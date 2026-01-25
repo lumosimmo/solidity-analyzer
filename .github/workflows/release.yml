@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            vscode_target: linux-x64
+            binary_name: solidity-analyzer-linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            vscode_target: linux-arm64
+            cross: true
+            binary_name: solidity-analyzer-linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            vscode_target: darwin-x64
+            binary_name: solidity-analyzer-darwin-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            vscode_target: darwin-arm64
+            binary_name: solidity-analyzer-darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            vscode_target: win32-x64
+            binary_name: solidity-analyzer-win32-x64.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            vscode_target: win32-arm64
+            binary_name: solidity-analyzer-win32-arm64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux ARM64)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p solidity-analyzer
+          else
+            cargo build --release --target ${{ matrix.target }} -p solidity-analyzer
+          fi
+        shell: bash
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install extension dependencies
+        working-directory: editors/code
+        run: bun install --frozen-lockfile
+
+      - name: Copy binary to extension
+        run: |
+          mkdir -p editors/code/server
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/solidity-analyzer.exe editors/code/server/
+          else
+            cp target/${{ matrix.target }}/release/solidity-analyzer editors/code/server/
+          fi
+        shell: bash
+
+      - name: Prepare standalone binary
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/solidity-analyzer.exe ${{ matrix.binary_name }}
+          else
+            cp target/${{ matrix.target }}/release/solidity-analyzer ${{ matrix.binary_name }}
+          fi
+        shell: bash
+
+      - name: Package VSIX
+        working-directory: editors/code
+        run: bun run package --target ${{ matrix.vscode_target }} --out ../../solidity-analyzer-${{ matrix.vscode_target }}.vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vscode_target }}
+          path: solidity-analyzer-${{ matrix.vscode_target }}.vsix
+
+      - name: Upload standalone binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.vscode_target }}
+          path: ${{ matrix.binary_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.vsix
+            solidity-analyzer-*
+          draft: true
+          generate_release_notes: true
