@@ -141,6 +141,23 @@ jobs:
           pattern: bin-*
           merge-multiple: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Publish VS Code Marketplace packages
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for vsix in *.vsix; do
+            echo "Publishing ${vsix}"
+            vsce publish --packagePath "${vsix}"
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
