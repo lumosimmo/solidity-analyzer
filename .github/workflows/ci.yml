@@ -16,6 +16,8 @@ env:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=bfd
     steps:
       - name: Checkout
         uses: actions/checkout@v4
