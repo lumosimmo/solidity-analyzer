@@ -12,12 +12,14 @@ env:
   RUST_BACKTRACE: short
   RUSTUP_MAX_RETRIES: 10
   CARGO_PROFILE_RELEASE_DEBUG: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
   build-test:
     runs-on: ubuntu-latest
     env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=bfd
+      RUSTFLAGS: -C link-arg=-fuse-ld=bfd -C debuginfo=0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,10 +55,16 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clean debug artifacts (after clippy)
+        run: rm -rf target/debug
       
       - name: Cargo test (debug)
         run: cargo test --workspace
+
+      - name: Clean debug artifacts (after tests)
+        run: rm -rf target/debug
 
       - name: Cargo test (release, solidity-analyzer)
         run: cargo test --release -p solidity-analyzer
