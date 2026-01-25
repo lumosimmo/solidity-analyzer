@@ -5,76 +5,38 @@ on:
     branches: ["master"]
   pull_request:
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  RUST_BACKTRACE: short
-  RUSTUP_MAX_RETRIES: 10
-  CARGO_PROFILE_RELEASE_DEBUG: 0
-  CARGO_PROFILE_DEV_DEBUG: 0
-  CARGO_PROFILE_TEST_DEBUG: 0
-
 jobs:
-  build-test:
-    runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=bfd -C debuginfo=0
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo docker image prune --all --force
-          df -h
-      
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
+  fmt:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      components: rustfmt
+      command: cargo fmt --all --check
+      free_disk: false
+      use_sccache: false
+      use_rust_cache: false
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.3
+  clippy:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      components: clippy
+      command: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-      
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: |
-            ~/.cache/sccache
+  test-debug:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      command: cargo test --workspace
 
-      - name: Cargo fmt
-        run: cargo fmt --all --check
+  test-release:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      command: cargo test --release -p solidity-analyzer
 
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+  build-release:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      command: cargo build --locked --release -p solidity-analyzer
 
-      - name: Clean debug artifacts (after clippy)
-        run: rm -rf target/debug
-      
-      - name: Cargo test (debug)
-        run: cargo test --workspace
-
-      - name: Clean debug artifacts (after tests)
-        run: rm -rf target/debug
-
-      - name: Cargo test (release, solidity-analyzer)
-        run: cargo test --release -p solidity-analyzer
-
-      - name: Cargo build (release, solidity-analyzer)
-        run: cargo build --locked --release -p solidity-analyzer
-
-      - name: Xtask dist
-        run: cargo run -p xtask -- dist --skip-build
-
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
+  xtask-dist:
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      command: cargo run -p xtask -- dist

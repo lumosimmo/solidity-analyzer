@@ -16,15 +16,13 @@ env:
 
 jobs:
   release-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cargo test (release, full workspace)
-        run: cargo test --workspace --release --locked
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      command: cargo test --workspace --release --locked
+      free_disk: false
+      use_sccache: false
+      use_rust_cache: false
+      rustflags: ""
 
   build:
     needs: release-tests

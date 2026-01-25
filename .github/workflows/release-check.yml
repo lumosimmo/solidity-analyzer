@@ -5,55 +5,12 @@ on:
     - cron: "0 2 * * 0"
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  RUST_BACKTRACE: short
-  RUSTUP_MAX_RETRIES: 10
-  CARGO_PROFILE_RELEASE_DEBUG: 0
-
 jobs:
   release-check:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo docker image prune --all --force
-          df -h
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.3
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-directories: |
-            ~/.cache/sccache
-
-      - name: Cargo test (release, full workspace)
-        run: cargo test --workspace --release --locked
-
-      - name: Cargo build (release, solidity-analyzer)
-        run: cargo build --locked --release -p solidity-analyzer
-
-      - name: Xtask dist
-        run: cargo run -p xtask -- dist --skip-build
-
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
+    uses: ./.github/workflows/rust-job.yml
+    with:
+      rustflags: ""
+      command: |
+        cargo test --workspace --release --locked
+        cargo build --locked --release -p solidity-analyzer
+        cargo run -p xtask -- dist --skip-build
