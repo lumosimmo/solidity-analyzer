@@ -4,16 +4,18 @@ use std::process::Command;
 
 use crate::{XtaskError, workspace_root};
 
-pub fn run(out_dir: Option<PathBuf>) -> Result<(), XtaskError> {
+pub fn run(out_dir: Option<PathBuf>, skip_build: bool) -> Result<(), XtaskError> {
     let root = workspace_root()?;
-    let status = Command::new("cargo")
-        .current_dir(&root)
-        .args(["build", "--locked", "--release", "-p", "solidity-analyzer"])
-        .status()
-        .map_err(|err| XtaskError::new(format!("failed to run cargo build: {err}")))?;
+    if !skip_build {
+        let status = Command::new("cargo")
+            .current_dir(&root)
+            .args(["build", "--locked", "--release", "-p", "solidity-analyzer"])
+            .status()
+            .map_err(|err| XtaskError::new(format!("failed to run cargo build: {err}")))?;
 
-    if !status.success() {
-        return Err(XtaskError::new("dist build failed"));
+        if !status.success() {
+            return Err(XtaskError::new("dist build failed"));
+        }
     }
 
     let exe_name = if cfg!(windows) {
@@ -23,9 +25,15 @@ pub fn run(out_dir: Option<PathBuf>) -> Result<(), XtaskError> {
     };
     let source = root.join("target").join("release").join(exe_name);
     if !source.exists() {
+        let hint = if skip_build {
+            " (run without --skip-build to build it)"
+        } else {
+            ""
+        };
         return Err(XtaskError::new(format!(
-            "missing build artifact at {}",
-            source.display()
+            "missing build artifact at {}{}",
+            source.display(),
+            hint
         )));
     }
 

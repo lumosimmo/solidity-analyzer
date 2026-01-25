@@ -10,9 +10,24 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
+  RUSTUP_MAX_RETRIES: 10
+  CARGO_PROFILE_RELEASE_DEBUG: 0
 
 jobs:
+  release-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo test (release, full workspace)
+        run: cargo test --workspace --release --locked
+
   build:
+    needs: release-tests
     strategy:
       matrix:
         include:
@@ -59,9 +74,9 @@ jobs:
       - name: Build binary
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }} -p solidity-analyzer
+            cross build --locked --release --target ${{ matrix.target }} -p solidity-analyzer
           else
-            cargo build --release --target ${{ matrix.target }} -p solidity-analyzer
+            cargo build --locked --release --target ${{ matrix.target }} -p solidity-analyzer
           fi
         shell: bash
 

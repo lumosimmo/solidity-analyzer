@@ -45,7 +45,32 @@ fn parse_dist_out_dir() {
     assert_eq!(
         cmd,
         Command::Dist {
-            out_dir: Some(PathBuf::from("dist"))
+            out_dir: Some(PathBuf::from("dist")),
+            skip_build: false
+        }
+    );
+}
+
+#[test]
+fn parse_dist_skip_build() {
+    let cmd = parse_args(["dist", "--skip-build"]).expect("parse dist");
+    assert_eq!(
+        cmd,
+        Command::Dist {
+            out_dir: None,
+            skip_build: true
+        }
+    );
+}
+
+#[test]
+fn parse_dist_out_dir_and_skip_build() {
+    let cmd = parse_args(["dist", "--out-dir", "dist", "--skip-build"]).expect("parse dist");
+    assert_eq!(
+        cmd,
+        Command::Dist {
+            out_dir: Some(PathBuf::from("dist")),
+            skip_build: true
         }
     );
 }
@@ -69,6 +94,14 @@ fn help_includes_ext_flags() {
     assert!(text.contains("ext"));
     assert!(text.contains("--target"));
     assert!(text.contains("--out"));
+}
+
+#[test]
+fn help_includes_dist_flags() {
+    let text = help_text();
+    assert!(text.contains("dist"));
+    assert!(text.contains("--out-dir"));
+    assert!(text.contains("--skip-build"));
 }
 
 #[test]
@@ -96,6 +129,15 @@ fn parse_dist_requires_out_dir_value() {
         &["dist", "--out-dir", "a", "--out-dir", "b"],
         "duplicate --out-dir",
     );
+}
+
+#[test]
+fn parse_dist_rejects_invalid_flags() {
+    assert_parse_error(
+        &["dist", "--skip-build", "--skip-build"],
+        "duplicate --skip-build",
+    );
+    assert_parse_error(&["dist", "--nope"], "unexpected argument for dist");
 }
 
 #[test]

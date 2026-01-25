@@ -6,7 +6,7 @@ mod dist;
 mod ext;
 mod profile;
 
-const HELP_TEXT: &str = "xtask commands:\n  help\n  codegen [--check]\n  profile [--out PATH]\n  dist [--out-dir DIR]\n  ext [--target <vscode-target>] [--out PATH]";
+const HELP_TEXT: &str = "xtask commands:\n  help\n  codegen [--check]\n  profile [--out PATH]\n  dist [--out-dir DIR] [--skip-build]\n  ext [--target <vscode-target>] [--out PATH]";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
@@ -19,6 +19,7 @@ pub enum Command {
     },
     Dist {
         out_dir: Option<PathBuf>,
+        skip_build: bool,
     },
     Ext {
         target: Option<String>,
@@ -39,6 +40,15 @@ enum ParseExtResult {
     Args {
         target: Option<String>,
         out: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ParseDistResult {
+    Help,
+    Args {
+        out_dir: Option<PathBuf>,
+        skip_build: bool,
     },
 }
 
@@ -99,12 +109,17 @@ where
             Ok(Command::Profile { out })
         }
         "dist" => {
-            let out_dir = match parse_optional_flag_value(&mut iter, "--out-dir", "dist")? {
-                ParseFlagResult::Help => return Ok(Command::Help),
-                ParseFlagResult::Value(value) => Some(value),
-                ParseFlagResult::None => None,
-            };
-            Ok(Command::Dist { out_dir })
+            let parsed = parse_dist_flags(&mut iter)?;
+            match parsed {
+                ParseDistResult::Help => Ok(Command::Help),
+                ParseDistResult::Args {
+                    out_dir,
+                    skip_build,
+                } => Ok(Command::Dist {
+                    out_dir,
+                    skip_build,
+                }),
+            }
         }
         "ext" => {
             let parsed = parse_ext_flags(&mut iter)?;
@@ -129,7 +144,10 @@ where
         }
         Command::Codegen { check } => codegen::run(check),
         Command::Profile { out } => profile::run(out),
-        Command::Dist { out_dir } => dist::run(out_dir),
+        Command::Dist {
+            out_dir,
+            skip_build,
+        } => dist::run(out_dir, skip_build),
         Command::Ext { target, out } => ext::run(target, out),
     }
 }
@@ -242,4 +260,48 @@ where
     }
 
     Ok(ParseExtResult::Args { target, out })
+}
+
+fn parse_dist_flags<I, S>(iter: &mut I) -> Result<ParseDistResult, XtaskError>
+where
+    I: Iterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut out_dir = None;
+    let mut skip_build = false;
+
+    while let Some(arg) = iter.next() {
+        match arg.as_ref() {
+            "--help" | "-h" => return Ok(ParseDistResult::Help),
+            "--skip-build" => {
+                if skip_build {
+                    return Err(XtaskError::new("duplicate --skip-build flag"));
+                }
+                skip_build = true;
+            }
+            "--out-dir" => {
+                if out_dir.is_some() {
+                    return Err(XtaskError::new("duplicate --out-dir flag"));
+                }
+                let value = iter
+                    .next()
+                    .ok_or_else(|| XtaskError::new("missing value for --out-dir"))?;
+                let value_str = value.as_ref();
+                if value_str.trim().is_empty() {
+                    return Err(XtaskError::new("missing value for --out-dir"));
+                }
+                out_dir = Some(PathBuf::from(value_str));
+            }
+            other => {
+                return Err(XtaskError::new(format!(
+                    "unexpected argument for dist: {other}"
+                )));
+            }
+        }
+    }
+
+    Ok(ParseDistResult::Args {
+        out_dir,
+        skip_build,
+    })
 }

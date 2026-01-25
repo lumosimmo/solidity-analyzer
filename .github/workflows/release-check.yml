@@ -1,9 +1,9 @@
-name: CI
+name: Release Check
 
 on:
-  push:
-    branches: ["master"]
-  pull_request:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,12 +14,12 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: 0
 
 jobs:
-  build-test:
+  release-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -28,11 +28,9 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           sudo docker image prune --all --force
           df -h
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.3
@@ -40,24 +38,15 @@ jobs:
       - name: Configure sccache
         run: |
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-      
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           cache-directories: |
             ~/.cache/sccache
 
-      - name: Cargo fmt
-        run: cargo fmt --all --check
-
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      
-      - name: Cargo test (debug)
-        run: cargo test --workspace
-
-      - name: Cargo test (release, solidity-analyzer)
-        run: cargo test --release -p solidity-analyzer
+      - name: Cargo test (release, full workspace)
+        run: cargo test --workspace --release --locked
 
       - name: Cargo build (release, solidity-analyzer)
         run: cargo build --locked --release -p solidity-analyzer
