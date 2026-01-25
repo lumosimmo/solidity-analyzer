@@ -1,0 +1,353 @@
+{
+    "name": "solidity-analyzer",
+    "displayName": "solidity-analyzer",
+    "description": "Solidity language support for Visual Studio Code",
+    "private": true,
+    "icon": "icon.png",
+    "version": "0.1.0",
+    "publisher": "lumosimmo",
+    "type": "commonjs",
+    "repository": {
+        "url": "https://github.com/lumosimmo/solidity-analyzer",
+        "type": "git"
+    },
+    "homepage": "https://github.com/lumosimmo/solidity-analyzer",
+    "license": "GPL-3.0-only",
+    "keywords": [
+        "solidity",
+        "foundry",
+        "lsp"
+    ],
+    "categories": [
+        "Formatters",
+        "Programming Languages"
+    ],
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "solidity-analyzer launches Foundry, solc, and configured binaries. A malicious workspace could exploit this to run arbitrary code on your machine."
+        }
+    },
+    "engines": {
+        "vscode": "^1.93.0"
+    },
+    "main": "./out/main",
+    "scripts": {
+        "vscode:prepublish": "bun run build-base -- --minify",
+        "build-base": "bun x esbuild src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node --target=node20",
+        "build": "bun run build-base -- --sourcemap",
+        "build-tests": "bun x esbuild tests/integration/index.ts --bundle --outfile=out/tests/integration/index.js --external:vscode --format=cjs --platform=node --target=node20",
+        "watch": "bun run build-base -- --sourcemap --watch",
+        "dev:link-server": "bun scripts/link-server.js",
+        "format": "bun x prettier . --write",
+        "lint": "bun x eslint .",
+        "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+        "pretest": "bun run typecheck && bun run build",
+        "test": "bun test tests/unit",
+        "test:integration": "bun run build-tests && bun tests/runTests.ts",
+        "package": "bun scripts/package.js",
+        "publish": "bun scripts/publish.js"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/node": "~22.13.4",
+        "@types/vscode": "~1.93.0",
+        "@vscode/test-electron": "^2.4.1",
+        "@vscode/vsce": "^3.6.0",
+        "esbuild": "^0.27.2",
+        "eslint": "^9.39.2",
+        "prettier": "^3.8.0",
+        "typescript": "^5.7.3"
+    },
+    "activationEvents": [
+        "workspaceContains:foundry.toml",
+        "workspaceContains:*/foundry.toml",
+        "onLanguage:solidity"
+    ],
+    "contributes": {
+        "configuration": {
+            "title": "solidity-analyzer",
+            "properties": {
+                "solidity-analyzer.server.path": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null,
+                    "description": "Path to the solidity-analyzer language server binary."
+                },
+                "solidity-analyzer.server.extraEnv": {
+                    "type": "object",
+                    "default": {},
+                    "description": "Environment variables passed to the language server (supports ${env:VAR} expansion).",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "solidity-analyzer.trace.server": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
+                    "default": "off",
+                    "description": "Trace level for the language server."
+                },
+                "solidity-analyzer.statusBar.show": {
+                    "type": "string",
+                    "enum": [
+                        "always",
+                        "never",
+                        "whenActive"
+                    ],
+                    "default": "whenActive",
+                    "description": "When to show the solidity-analyzer status bar item."
+                },
+                "solidity-analyzer.statusBar.clickAction": {
+                    "type": "string",
+                    "enum": [
+                        "openLogs",
+                        "restartServer"
+                    ],
+                    "default": "openLogs",
+                    "description": "Action to run when clicking the solidity-analyzer status bar item."
+                },
+                "solidity-analyzer.completion.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable LSP completion results from solidity-analyzer."
+                },
+                "solidity-analyzer.hover.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable hover results from solidity-analyzer."
+                },
+                "solidity-analyzer.signatureHelp.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable signature help results from solidity-analyzer."
+                },
+                "solidity-analyzer.rename.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable rename results from solidity-analyzer."
+                },
+                "solidity-analyzer.references.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable reference search results from solidity-analyzer."
+                },
+                "solidity-analyzer.diagnostics.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable diagnostics published by solidity-analyzer."
+                },
+                "solidity-analyzer.diagnostics.onSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Re-run diagnostics when saving Solidity files."
+                },
+                "solidity-analyzer.diagnostics.onChange": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Re-run diagnostics after changes without saving."
+                },
+                "solidity-analyzer.format.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable formatting requests using forge fmt."
+                },
+                "solidity-analyzer.format.onSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Format Solidity files on save using forge fmt."
+                },
+                "solidity-analyzer.lint.enable": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable lint diagnostics from forge lint."
+                },
+                "solidity-analyzer.lint.onSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Run forge lint on save."
+                },
+                "solidity-analyzer.lint.fixOnSave": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Apply available lint fixes on save."
+                },
+                "solidity-analyzer.toolchain.promptInstall": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Prompt to install solc when it is missing."
+                },
+                "solidity-analyzer.initializeStopped": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Do not start the language server when the extension activates."
+                }
+            }
+        },
+        "commands": [
+            {
+                "command": "solidity-analyzer.startServer",
+                "title": "Start Server",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.stopServer",
+                "title": "Stop Server",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.restartServer",
+                "title": "Restart Server",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.openLogs",
+                "title": "Open Logs",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.installFoundrySolc",
+                "title": "Install Foundry solc",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.indexedFiles",
+                "title": "Indexed Files",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.rename",
+                "title": "Rename Symbol",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.findReferences",
+                "title": "Find References",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.triggerSignatureHelp",
+                "title": "Trigger Signature Help",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.formatDocument",
+                "title": "Format Document",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.formatSelection",
+                "title": "Format Selection",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.runLint",
+                "title": "Run Lint Actions",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.fixAllLints",
+                "title": "Fix All Lints",
+                "category": "solidity-analyzer"
+            },
+            {
+                "command": "solidity-analyzer.showIndexedFiles",
+                "title": "Show Indexed Files",
+                "category": "solidity-analyzer"
+            }
+        ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "solidity-analyzer.rename",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.findReferences",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.triggerSignatureHelp",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.formatDocument",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.formatSelection",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.runLint",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.fixAllLints",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.showIndexedFiles",
+                    "when": "editorLangId == solidity"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "solidity-analyzer.rename",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.findReferences",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.triggerSignatureHelp",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.formatDocument",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.formatSelection",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.runLint",
+                    "when": "editorLangId == solidity"
+                },
+                {
+                    "command": "solidity-analyzer.fixAllLints",
+                    "when": "editorLangId == solidity"
+                }
+            ]
+        },
+        "languages": [
+            {
+                "id": "solidity",
+                "aliases": [
+                    "Solidity",
+                    "sol"
+                ],
+                "extensions": [
+                    ".sol"
+                ]
+            }
+        ],
+        "grammars": [
+            {
+                "language": "solidity",
+                "scopeName": "source.solidity",
+                "path": "./syntaxes/solidity.tmLanguage.json"
+            }
+        ]
+    }
+}

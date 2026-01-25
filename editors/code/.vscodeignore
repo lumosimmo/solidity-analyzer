@@ -1,0 +1,10 @@
+# Source files (exclude)
+src/**
+tests/**
+tsconfig*.json
+.eslintrc*
+.prettierrc*
+bun.lock
+
+# Include server binary (negation)
+!server/**

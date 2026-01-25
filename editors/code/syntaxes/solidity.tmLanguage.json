@@ -1,0 +1,1977 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Solidity",
+    "scopeName": "source.solidity",
+    "fileTypes": ["sol"],
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#pragma"
+        },
+        {
+            "include": "#import"
+        },
+        {
+            "include": "#using"
+        },
+        {
+            "include": "#assembly"
+        },
+        {
+            "include": "#declarations"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#type-qualified-access"
+        },
+        {
+            "include": "#builtins"
+        },
+        {
+            "include": "#operators"
+        },
+        {
+            "include": "#punctuation"
+        },
+        {
+            "include": "#function-call"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "include": "#natspec-block"
+                },
+                {
+                    "include": "#natspec-line"
+                },
+                {
+                    "include": "#comment-line"
+                },
+                {
+                    "include": "#comment-block"
+                }
+            ]
+        },
+        "comment-todo": {
+            "match": "(?i)\\b(FIXME|TODO|CHANGED|XXX|IDEA|HACK|NOTE|REVIEW|NB|BUG|QUESTION|COMBAK|TEMP|SUPPRESS|LINT|\\w+-disable|\\w+-suppress)\\b(?-i)",
+            "name": "keyword.comment.todo.solidity"
+        },
+        "spdx-license": {
+            "match": "(?i)\\bSPDX-License-Identifier\\s*:\\s*([^\\s*]+(?:\\s+WITH\\s+[^\\s*]+)?(?:\\s+(?:AND|OR)\\s+[^\\s*]+(?:\\s+WITH\\s+[^\\s*]+)?)*)",
+            "captures": {
+                "0": {
+                    "name": "keyword.other.documentation.spdx.solidity"
+                },
+                "1": {
+                    "name": "constant.other.spdx.license.solidity"
+                }
+            }
+        },
+        "natspec-block": {
+            "begin": "/\\*\\*",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.begin.solidity"
+                }
+            },
+            "end": "\\*/",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.end.solidity"
+                }
+            },
+            "name": "comment.block.documentation.solidity",
+            "patterns": [
+                {
+                    "include": "#spdx-license"
+                },
+                {
+                    "include": "#natspec-tags"
+                },
+                {
+                    "include": "#comment-todo"
+                }
+            ]
+        },
+        "natspec-line": {
+            "begin": "///(?!/)",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.solidity"
+                }
+            },
+            "end": "$",
+            "name": "comment.line.documentation.solidity",
+            "patterns": [
+                {
+                    "include": "#spdx-license"
+                },
+                {
+                    "include": "#natspec-tags"
+                },
+                {
+                    "include": "#comment-todo"
+                }
+            ]
+        },
+        "natspec-tags": {
+            "patterns": [
+                {
+                    "include": "#natspec-tag-solidity"
+                },
+                {
+                    "include": "#natspec-tag-title"
+                },
+                {
+                    "include": "#natspec-tag-author"
+                },
+                {
+                    "include": "#natspec-tag-notice"
+                },
+                {
+                    "include": "#natspec-tag-dev"
+                },
+                {
+                    "include": "#natspec-tag-param"
+                },
+                {
+                    "include": "#natspec-tag-return"
+                },
+                {
+                    "include": "#natspec-tag-inheritdoc"
+                },
+                {
+                    "include": "#natspec-tag-custom"
+                }
+            ]
+        },
+        "natspec-tag-solidity": {
+            "match": "(?<![\\w])(@solidity)\\b(?:\\s+(memory-safe-assembly)\\b)?",
+            "captures": {
+                "1": {
+                    "name": "keyword.other.documentation.natspec.solidity"
+                },
+                "2": {
+                    "name": "invalid.deprecated.annotation.solidity"
+                }
+            }
+        },
+        "natspec-tag-title": {
+            "match": "(?<![\\w])(@title)\\b",
+            "name": "keyword.other.documentation.natspec.title.solidity"
+        },
+        "natspec-tag-author": {
+            "match": "(?<![\\w])(@author)\\b",
+            "name": "keyword.other.documentation.natspec.author.solidity"
+        },
+        "natspec-tag-notice": {
+            "match": "(?<![\\w])(@notice)\\b",
+            "name": "keyword.other.documentation.natspec.notice.solidity"
+        },
+        "natspec-tag-dev": {
+            "match": "(?<![\\w])(@dev)\\b",
+            "name": "keyword.other.documentation.natspec.dev.solidity"
+        },
+        "natspec-tag-param": {
+            "match": "(?<![\\w])(@param)\\b(?:\\s+([A-Za-z_]\\w*))?",
+            "captures": {
+                "1": {
+                    "name": "keyword.other.documentation.natspec.param.solidity"
+                },
+                "2": {
+                    "name": "variable.other.parameter.natspec.solidity"
+                }
+            }
+        },
+        "natspec-tag-return": {
+            "match": "(?<![\\w])(@return)\\b(?:\\s+([A-Za-z_]\\w*))?",
+            "captures": {
+                "1": {
+                    "name": "keyword.other.documentation.natspec.return.solidity"
+                },
+                "2": {
+                    "name": "variable.other.parameter.natspec.solidity"
+                }
+            }
+        },
+        "natspec-tag-inheritdoc": {
+            "match": "(?<![\\w])(@inheritdoc)\\b(?:\\s+([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*))?",
+            "captures": {
+                "1": {
+                    "name": "keyword.other.documentation.natspec.inheritdoc.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.natspec.solidity"
+                }
+            }
+        },
+        "natspec-tag-custom": {
+            "match": "(?<![\\w])(@custom:)([a-z](?:[a-z-]*[a-z])?)\\b",
+            "captures": {
+                "1": {
+                    "name": "keyword.other.documentation.natspec.custom.solidity"
+                },
+                "2": {
+                    "name": "entity.name.tag.natspec.solidity"
+                }
+            }
+        },
+        "comment-line": {
+            "begin": "//",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.solidity"
+                }
+            },
+            "end": "$",
+            "name": "comment.line.double-slash.solidity",
+            "patterns": [
+                {
+                    "include": "#spdx-license"
+                },
+                {
+                    "include": "#comment-todo"
+                }
+            ]
+        },
+        "comment-block": {
+            "begin": "/\\*(?!\\*)",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.begin.solidity"
+                }
+            },
+            "end": "\\*/",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.comment.end.solidity"
+                }
+            },
+            "name": "comment.block.solidity",
+            "patterns": [
+                {
+                    "include": "#spdx-license"
+                },
+                {
+                    "include": "#comment-todo"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "include": "#string-prefixed-double"
+                },
+                {
+                    "include": "#string-prefixed-single"
+                },
+                {
+                    "include": "#string-double"
+                },
+                {
+                    "include": "#string-single"
+                }
+            ]
+        },
+        "string-escapes": {
+            "patterns": [
+                {
+                    "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[\\\\\\\"'0anrt])",
+                    "name": "constant.character.escape.solidity"
+                },
+                {
+                    "match": "\\\\[bfv]",
+                    "name": "invalid.illegal.escape.solidity"
+                }
+            ]
+        },
+        "string-prefixed-double": {
+            "begin": "\\b(unicode|hex)\\b\\s*(\\\")",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.other.string.prefix.solidity"
+                },
+                "2": {
+                    "name": "punctuation.definition.string.begin.solidity"
+                }
+            },
+            "end": "\\\"",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.solidity"
+                }
+            },
+            "name": "string.quoted.double.solidity",
+            "patterns": [
+                {
+                    "include": "#string-escapes"
+                }
+            ]
+        },
+        "string-prefixed-single": {
+            "begin": "\\b(unicode|hex)\\b\\s*(')",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.other.string.prefix.solidity"
+                },
+                "2": {
+                    "name": "punctuation.definition.string.begin.solidity"
+                }
+            },
+            "end": "'",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.solidity"
+                }
+            },
+            "name": "string.quoted.single.solidity",
+            "patterns": [
+                {
+                    "include": "#string-escapes"
+                }
+            ]
+        },
+        "string-double": {
+            "begin": "\\\"",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.solidity"
+                }
+            },
+            "end": "\\\"",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.solidity"
+                }
+            },
+            "name": "string.quoted.double.solidity",
+            "patterns": [
+                {
+                    "include": "#string-escapes"
+                }
+            ]
+        },
+        "string-single": {
+            "begin": "'",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.begin.solidity"
+                }
+            },
+            "end": "'",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.definition.string.end.solidity"
+                }
+            },
+            "name": "string.quoted.single.solidity",
+            "patterns": [
+                {
+                    "include": "#string-escapes"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "include": "#number-hex"
+                },
+                {
+                    "include": "#version-number"
+                },
+                {
+                    "include": "#number-decimal-leading-dot"
+                },
+                {
+                    "include": "#number-decimal"
+                }
+            ]
+        },
+        "number-hex": {
+            "match": "\\b0[xX][0-9a-fA-F](?:[0-9a-fA-F_]*[0-9a-fA-F])?\\b",
+            "name": "constant.numeric.hex.solidity"
+        },
+        "version-number": {
+            "match": "\\b\\d+\\.\\d+\\.\\d+\\b",
+            "name": "constant.other.version.solidity"
+        },
+        "number-decimal-leading-dot": {
+            "match": "(?<![\\w\\]])\\.\\d(?:[\\d_]*\\d)?(?:[eE][+-]?\\d(?:[\\d_]*\\d)?)?\\b",
+            "name": "constant.numeric.decimal.solidity"
+        },
+        "number-decimal": {
+            "match": "\\b\\d(?:[\\d_]*\\d)?(?:\\.\\d(?:[\\d_]*\\d)?)?(?:[eE][+-]?\\d(?:[\\d_]*\\d)?)?\\b",
+            "name": "constant.numeric.decimal.solidity"
+        },
+        "pragma": {
+            "begin": "\\bpragma\\b",
+            "beginCaptures": {
+                "0": {
+                    "name": "keyword.control.pragma.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "patterns": [
+                {
+                    "match": "\\bsolidity\\b",
+                    "name": "entity.name.tag.pragma.solidity"
+                },
+                {
+                    "match": "\\b(abicoder|experimental)\\b",
+                    "name": "entity.name.tag.pragma.solidity"
+                },
+                {
+                    "match": "\\b(ABIEncoderV2|SMTChecker)\\b",
+                    "name": "constant.other.pragma.value.solidity"
+                },
+                {
+                    "match": "\\bv\\d+\\b",
+                    "name": "constant.other.version.solidity"
+                },
+                {
+                    "match": "(\\^|>=|<=|>|<|=)",
+                    "name": "keyword.operator.comparison.solidity"
+                },
+                {
+                    "include": "#version-number"
+                },
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "import": {
+            "begin": "\\bimport\\b",
+            "beginCaptures": {
+                "0": {
+                    "name": "keyword.control.import.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\*",
+                    "name": "keyword.operator.wildcard.solidity"
+                },
+                {
+                    "include": "#import-named-list"
+                },
+                {
+                    "match": "\\bfrom\\b",
+                    "name": "keyword.control.import.from.solidity"
+                },
+                {
+                    "match": "\\bas\\b",
+                    "name": "keyword.control.import.as.solidity"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.namespace.import.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "import-named-list": {
+            "begin": "\\{",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\bas\\b",
+                    "name": "keyword.control.import.as.solidity"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.import.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "using": {
+            "begin": "\\busing\\b",
+            "beginCaptures": {
+                "0": {
+                    "name": "keyword.control.using.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#using-function-list"
+                },
+                {
+                    "match": "\\bfor\\b",
+                    "name": "keyword.control.using.for.solidity"
+                },
+                {
+                    "match": "\\bglobal\\b",
+                    "name": "keyword.control.using.global.solidity"
+                },
+                {
+                    "match": "\\*",
+                    "name": "keyword.operator.wildcard.solidity"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b(?=\\s*\\bfor\\b)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.library.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#types"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "using-function-list": {
+            "begin": "\\{",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\b(as)\\b\\s*(&|~|\\||\\^|\\+|/|%|\\*|-|==|!=|>=|>|<=|<)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.control.using.as.solidity"
+                        },
+                        "2": {
+                            "name": "keyword.operator.overload.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\bas\\b",
+                    "name": "keyword.control.using.as.solidity"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.using.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "assembly": {
+            "patterns": [
+                {
+                    "include": "#assembly-block-memory-safe"
+                },
+                {
+                    "include": "#assembly-block"
+                }
+            ]
+        },
+        "assembly-block-memory-safe": {
+            "begin": "\\b(assembly)\\b\\s*(\\()\\s*(\\\"memory-safe\\\"(?:\\s*,\\s*\\\"(?:\\\\.|[^\\\"\\\\])*\\\")*)\\s*(\\))\\s*(\\{)",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.control.assembly.solidity"
+                },
+                "2": {
+                    "name": "punctuation.parameters.begin.solidity"
+                },
+                "3": {
+                    "name": "meta.annotation.memory-safe.assembly.solidity"
+                },
+                "4": {
+                    "name": "punctuation.parameters.end.solidity"
+                },
+                "5": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "name": "meta.block.assembly.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#yul-block"
+                },
+                {
+                    "include": "#yul-keywords"
+                },
+                {
+                    "include": "#yul-operators"
+                },
+                {
+                    "include": "#yul-builtins"
+                },
+                {
+                    "include": "#yul-special-members"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#punctuation-yul"
+                },
+                {
+                    "include": "#yul-function-call"
+                },
+                {
+                    "include": "#yul-identifiers"
+                }
+            ]
+        },
+        "assembly-block": {
+            "begin": "\\b(assembly)\\b(?:\\s*(\\()\\s*((?:\\\"(?:\\\\.|[^\\\"\\\\])*\\\"\\s*(?:,\\s*\\\"(?:\\\\.|[^\\\"\\\\])*\\\")*)?)\\s*(\\)))?\\s*(\\{)",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.control.assembly.solidity"
+                },
+                "2": {
+                    "name": "punctuation.parameters.begin.solidity"
+                },
+                "3": {
+                    "name": "meta.annotation.assembly.flags.solidity"
+                },
+                "4": {
+                    "name": "punctuation.parameters.end.solidity"
+                },
+                "5": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "name": "meta.block.assembly.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#yul-block"
+                },
+                {
+                    "include": "#yul-keywords"
+                },
+                {
+                    "include": "#yul-operators"
+                },
+                {
+                    "include": "#yul-builtins"
+                },
+                {
+                    "include": "#yul-special-members"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#punctuation-yul"
+                },
+                {
+                    "include": "#yul-function-call"
+                },
+                {
+                    "include": "#yul-identifiers"
+                }
+            ]
+        },
+        "yul-block": {
+            "begin": "\\{",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "name": "meta.block.yul.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#yul-block"
+                },
+                {
+                    "include": "#yul-keywords"
+                },
+                {
+                    "include": "#yul-operators"
+                },
+                {
+                    "include": "#yul-builtins"
+                },
+                {
+                    "include": "#yul-special-members"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#punctuation-yul"
+                },
+                {
+                    "include": "#yul-function-call"
+                },
+                {
+                    "include": "#yul-identifiers"
+                }
+            ]
+        },
+        "yul-keywords": {
+            "match": "\\b(let|function|if|switch|case|default|for|break|continue|leave)\\b",
+            "name": "keyword.control.yul.solidity"
+        },
+        "yul-operators": {
+            "match": "(:=|->)",
+            "name": "keyword.operator.assignment.yul.solidity"
+        },
+        "yul-builtins": {
+            "patterns": [
+                {
+                    "match": "\\b(verbatim_[0-9]{1,2}i_[0-9]{1,2}o)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "support.function.builtin.yul.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(add|addmod|address|and|balance|basefee|blobbasefee|blobhash|blockhash|call|calldatacopy|calldataload|calldatasize|callcode|caller|callvalue|chainid|clz|codecopy|codesize|coinbase|create|create2|datacopy|dataoffset|datasize|delegatecall|difficulty|div|ecrecover|eq|exp|extcodecopy|extcodehash|extcodesize|gas|gasprice|gt|invalid|iszero|keccak256|linkersymbol|loadimmutable|log0|log1|log2|log3|log4|lt|mcopy|mload|memoryguard|mod|mstore|mstore8|msize|mul|mulmod|not|number|or|origin|pc|pop|prevrandao|return|returndatacopy|returndatasize|revert|ripemd160|sar|sdiv|selfbalance|setimmutable|sgt|sha256|shl|shr|signextend|sload|slt|smod|sstore|staticcall|stop|sub|timestamp|tload|tstore|xor)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "support.function.builtin.yul.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(selfdestruct)\\b(?=\\s*\\()",
+                    "name": "invalid.deprecated.function.yul.solidity"
+                }
+            ]
+        },
+        "yul-special-members": {
+            "match": "(\\.)(slot|offset|length|selector|address)\\b",
+            "captures": {
+                "1": {
+                    "name": "punctuation.accessor.dot.solidity"
+                },
+                "2": {
+                    "name": "variable.other.member.yul.solidity"
+                }
+            }
+        },
+        "punctuation-yul": {
+            "patterns": [
+                {
+                    "match": ";",
+                    "name": "punctuation.terminator.statement.solidity"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.solidity"
+                },
+                {
+                    "match": "\\(",
+                    "name": "punctuation.parameters.begin.solidity"
+                },
+                {
+                    "match": "\\)",
+                    "name": "punctuation.parameters.end.solidity"
+                },
+                {
+                    "match": "\\[",
+                    "name": "punctuation.bracket.square.begin.solidity"
+                },
+                {
+                    "match": "\\]",
+                    "name": "punctuation.bracket.square.end.solidity"
+                },
+                {
+                    "match": ":",
+                    "name": "punctuation.separator.type.yul.solidity"
+                }
+            ]
+        },
+        "yul-identifiers": {
+            "match": "\\b([A-Za-z_\\$][A-Za-z0-9_\\$]*(?:\\.[A-Za-z_\\$][A-Za-z0-9_\\$]*)*)\\b",
+            "captures": {
+                "1": {
+                    "name": "variable.other.yul.solidity"
+                }
+            }
+        },
+        "yul-function-call": {
+            "match": "\\b(?!(let|function|if|switch|case|default|for|break|continue|leave)\\b)([A-Za-z_\\$][A-Za-z0-9_\\$]*(?:\\.[A-Za-z_\\$][A-Za-z0-9_\\$]*)*)\\b\\s*(\\()",
+            "captures": {
+                "2": {
+                    "name": "entity.name.function.yul.solidity"
+                },
+                "3": {
+                    "name": "punctuation.parameters.begin.solidity"
+                }
+            }
+        },
+        "declarations": {
+            "patterns": [
+                {
+                    "include": "#declaration-user-defined-value-type"
+                },
+                {
+                    "include": "#declaration-contract"
+                },
+                {
+                    "include": "#declaration-interface"
+                },
+                {
+                    "include": "#declaration-library"
+                },
+                {
+                    "include": "#declaration-struct"
+                },
+                {
+                    "include": "#declaration-enum"
+                },
+                {
+                    "include": "#declaration-event"
+                },
+                {
+                    "include": "#declaration-error"
+                },
+                {
+                    "include": "#declaration-constructor"
+                },
+                {
+                    "include": "#declaration-function"
+                },
+                {
+                    "include": "#declaration-receive"
+                },
+                {
+                    "include": "#declaration-fallback"
+                },
+                {
+                    "include": "#declaration-modifier"
+                }
+            ]
+        },
+        "declaration-user-defined-value-type": {
+            "begin": "\\b(type)\\b\\s+([A-Za-z_]\\w*)\\b\\s+\\b(is)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.userdefined.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.userdefined.solidity"
+                },
+                "3": {
+                    "name": "keyword.control.type.is.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "name": "meta.declaration.userdefined-value-type.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#types"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-contract": {
+            "begin": "\\b(abstract)\\b\\s+(contract)\\b\\s+([A-Za-z_]\\w*)\\b|\\b(contract)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.modifier.abstract.solidity"
+                },
+                "2": {
+                    "name": "storage.type.contract.solidity"
+                },
+                "3": {
+                    "name": "entity.name.type.contract.solidity"
+                },
+                "4": {
+                    "name": "storage.type.contract.solidity"
+                },
+                "5": {
+                    "name": "entity.name.type.contract.solidity"
+                }
+            },
+            "end": "\\{",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "name": "meta.declaration.contract.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\b(layout|at)\\b",
+                    "name": "keyword.control.layout.solidity"
+                },
+                {
+                    "match": "\\bis\\b",
+                    "name": "keyword.control.inheritance.solidity"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.inherited.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-interface": {
+            "begin": "\\b(interface)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.interface.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.interface.solidity"
+                }
+            },
+            "end": "\\{",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "name": "meta.declaration.interface.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\bis\\b",
+                    "name": "keyword.control.inheritance.solidity"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.type.inherited.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-library": {
+            "begin": "\\b(library)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.library.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.library.solidity"
+                }
+            },
+            "end": "\\{",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "name": "meta.declaration.library.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                }
+            ]
+        },
+        "declaration-struct": {
+            "begin": "\\b(struct)\\b\\s+([A-Za-z_]\\w*)\\b\\s*(\\{)",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.struct.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.struct.solidity"
+                },
+                "3": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "name": "meta.declaration.struct.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#types"
+                },
+                {
+                    "include": "#type-user-defined"
+                },
+                {
+                    "include": "#storage-location"
+                },
+                {
+                    "include": "#type-modifiers"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b(?=\\s*(?:\\[[^\\]]*\\]\\s*)*;)",
+                    "captures": {
+                        "1": {
+                            "name": "variable.other.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-enum": {
+            "begin": "\\b(enum)\\b\\s+([A-Za-z_]\\w*)\\b\\s*(\\{)",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.enum.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.enum.solidity"
+                },
+                "3": {
+                    "name": "punctuation.brace.curly.begin.solidity"
+                }
+            },
+            "end": "\\}",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.brace.curly.end.solidity"
+                }
+            },
+            "name": "meta.declaration.enum.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "constant.other.enum-member.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-event": {
+            "begin": "\\b(event)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.event.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.event.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "name": "meta.declaration.event.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#parameter-list-event"
+                },
+                {
+                    "match": "\\banonymous\\b",
+                    "name": "storage.modifier.anonymous.solidity"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-error": {
+            "begin": "\\b(error)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.error.solidity"
+                },
+                "2": {
+                    "name": "entity.name.type.error.solidity"
+                }
+            },
+            "end": ";",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.terminator.statement.solidity"
+                }
+            },
+            "name": "meta.declaration.error.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-constructor": {
+            "begin": "\\b(constructor)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.constructor.solidity"
+                }
+            },
+            "end": "(?=\\{|;)",
+            "name": "meta.declaration.constructor.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#function-signature-modifiers"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-function": {
+            "begin": "\\b(function)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.function.solidity"
+                },
+                "2": {
+                    "name": "entity.name.function.solidity"
+                }
+            },
+            "end": "(?=\\{|;)",
+            "name": "meta.declaration.function.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#function-returns"
+                },
+                {
+                    "include": "#function-signature-modifiers"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-modifier": {
+            "begin": "\\b(modifier)\\b\\s+([A-Za-z_]\\w*)\\b",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.modifier.solidity"
+                },
+                "2": {
+                    "name": "entity.name.function.modifier.solidity"
+                }
+            },
+            "end": "(?=\\{)",
+            "name": "meta.declaration.modifier.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#function-signature-modifiers"
+                },
+                {
+                    "include": "#punctuation"
+                },
+                {
+                    "match": "\\b_\\b",
+                    "name": "keyword.control.placeholder.modifier.solidity"
+                }
+            ]
+        },
+        "declaration-receive": {
+            "begin": "\\b(receive)\\b\\s*(?=\\()",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.function.receive.solidity"
+                }
+            },
+            "end": "(?=\\{|;)",
+            "name": "meta.declaration.receive.solidity",
+            "patterns": [
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#function-signature-modifiers"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "declaration-fallback": {
+            "begin": "\\b(fallback)\\b\\s*(?=\\()",
+            "beginCaptures": {
+                "1": {
+                    "name": "storage.type.function.fallback.solidity"
+                }
+            },
+            "end": "(?=\\{|;)",
+            "name": "meta.declaration.fallback.solidity",
+            "patterns": [
+                {
+                    "include": "#parameter-list"
+                },
+                {
+                    "include": "#function-returns"
+                },
+                {
+                    "include": "#function-signature-modifiers"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "parameter-list": {
+            "begin": "\\(",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.parameters.begin.solidity"
+                }
+            },
+            "end": "\\)",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.parameters.end.solidity"
+                }
+            },
+            "name": "meta.parameters.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#types"
+                },
+                {
+                    "include": "#storage-location"
+                },
+                {
+                    "include": "#type-modifiers"
+                },
+                {
+                    "include": "#type-user-defined"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b(?=\\s*(?:,|\\)))",
+                    "captures": {
+                        "1": {
+                            "name": "variable.other.readwrite.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "parameter-list-event": {
+            "begin": "\\(",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.parameters.begin.solidity"
+                }
+            },
+            "end": "\\)",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.parameters.end.solidity"
+                }
+            },
+            "name": "meta.parameters.event.solidity",
+            "patterns": [
+                {
+                    "include": "#comments"
+                },
+                {
+                    "include": "#types"
+                },
+                {
+                    "match": "\\bindexed\\b",
+                    "name": "storage.modifier.indexed.solidity"
+                },
+                {
+                    "include": "#storage-location"
+                },
+                {
+                    "include": "#type-modifiers"
+                },
+                {
+                    "include": "#type-user-defined"
+                },
+                {
+                    "match": "\\b([A-Za-z_]\\w*)\\b(?=\\s*(?:,|\\)))",
+                    "captures": {
+                        "1": {
+                            "name": "variable.other.readwrite.solidity"
+                        }
+                    }
+                },
+                {
+                    "include": "#numbers"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "function-returns": {
+            "begin": "\\breturns\\b",
+            "beginCaptures": {
+                "0": {
+                    "name": "keyword.control.returns.solidity"
+                }
+            },
+            "end": "(?=\\{|;|\\b(public|private|internal|external|pure|view|payable|virtual|override|immutable|constant|transient)\\b|\\b[A-Za-z_]\\w*\\b)",
+            "name": "meta.returns.solidity",
+            "patterns": [
+                {
+                    "include": "#parameter-list"
+                }
+            ]
+        },
+        "storage-location": {
+            "match": "\\b(storage|memory|calldata)\\b",
+            "name": "storage.modifier.location.solidity"
+        },
+        "type-modifiers": {
+            "patterns": [
+                {
+                    "match": "\\b(public|private|internal|external)\\b",
+                    "name": "storage.modifier.visibility.solidity"
+                },
+                {
+                    "match": "\\b(pure|view|payable)\\b",
+                    "name": "storage.modifier.mutability.solidity"
+                },
+                {
+                    "match": "\\b(nonpayable)\\b",
+                    "name": "invalid.deprecated.keyword.solidity"
+                },
+                {
+                    "match": "\\b(constant|immutable|transient)\\b",
+                    "name": "storage.modifier.state.solidity"
+                },
+                {
+                    "match": "\\bvirtual\\b",
+                    "name": "storage.modifier.virtual.solidity"
+                },
+                {
+                    "include": "#override-specifier"
+                }
+            ]
+        },
+        "override-specifier": {
+            "patterns": [
+                {
+                    "begin": "\\boverride\\b\\s*(\\()",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "storage.modifier.override.solidity"
+                        },
+                        "1": {
+                            "name": "punctuation.parameters.begin.solidity"
+                        }
+                    },
+                    "end": "\\)",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.parameters.end.solidity"
+                        }
+                    },
+                    "name": "meta.override.solidity",
+                    "patterns": [
+                        {
+                            "include": "#comments"
+                        },
+                        {
+                            "match": "\\b([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b",
+                            "captures": {
+                                "1": {
+                                    "name": "entity.name.type.override.solidity"
+                                }
+                            }
+                        },
+                        {
+                            "include": "#punctuation"
+                        }
+                    ]
+                },
+                {
+                    "match": "\\boverride\\b",
+                    "name": "storage.modifier.override.solidity"
+                }
+            ]
+        },
+        "function-signature-modifiers": {
+            "patterns": [
+                {
+                    "include": "#type-modifiers"
+                },
+                {
+                    "match": "\\b(?!(external|internal|override|payable|private|public|pure|returns|virtual|view)\\b)([A-Za-z_]\\w*)\\b\\s*(\\()",
+                    "captures": {
+                        "2": {
+                            "name": "entity.name.function.modifier.solidity"
+                        },
+                        "3": {
+                            "name": "punctuation.parameters.begin.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(?!(external|internal|override|payable|private|public|pure|returns|virtual|view)\\b)([A-Za-z_]\\w*)\\b",
+                    "captures": {
+                        "2": {
+                            "name": "entity.name.function.modifier.solidity"
+                        }
+                    }
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(after|alias|apply|auto|case|copyof|default|define|final|implements|in|inline|let|macro|match|mutable|null|of|partial|promise|reference|relocatable|sealed|sizeof|static|supports|switch|typedef|typeof|var)\\b",
+                    "name": "invalid.deprecated.keyword.reserved.solidity"
+                },
+                {
+                    "match": "\\b(throw)\\b",
+                    "name": "invalid.deprecated.keyword.solidity"
+                },
+                {
+                    "match": "\\b(if|else|for|while|do|break|continue|return|try|catch|revert)\\b",
+                    "name": "keyword.control.flow.solidity"
+                },
+                {
+                    "match": "\\b(unchecked)\\b",
+                    "name": "keyword.control.unchecked.solidity"
+                },
+                {
+                    "match": "\\b(emit|new|delete)\\b",
+                    "name": "keyword.control.solidity"
+                },
+                {
+                    "match": "\\b(anonymous|indexed)\\b",
+                    "name": "storage.modifier.solidity"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "include": "#type-primitive"
+                },
+                {
+                    "include": "#type-mapping"
+                },
+                {
+                    "include": "#type-function"
+                },
+                {
+                    "include": "#type-deprecated"
+                }
+            ]
+        },
+        "type-primitive": {
+            "match": "\\b(address|bool|string|bytes(?:[1-9]|[12]\\d|3[0-2])?|uint(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|int(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|uint|int)\\b",
+            "name": "support.type.primitive.solidity"
+        },
+        "type-deprecated": {
+            "match": "\\b(byte|fixed|ufixed)\\b",
+            "name": "invalid.deprecated.type.solidity"
+        },
+        "type-mapping": {
+            "match": "\\bmapping\\b",
+            "name": "storage.type.mapping.solidity"
+        },
+        "type-function": {
+            "match": "\\bfunction\\b(?=\\s*\\()",
+            "name": "support.type.function.solidity"
+        },
+        "type-user-defined": {
+            "match": "\\b(?!(?:storage|memory|calldata|indexed)\\b)([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*)\\b(?=\\s*(?:\\[[^\\]]*\\]\\s*)*(?:(?:storage|memory|calldata)\\s+)?[A-Za-z_]\\w*\\b)",
+            "captures": {
+                "1": {
+                    "name": "entity.name.type.solidity"
+                }
+            }
+        },
+        "type-qualified-access": {
+            "match": "\\b([A-Z][A-Za-z0-9_]*)\\b(?=\\s*\\.)",
+            "captures": {
+                "1": {
+                    "name": "entity.name.type.solidity"
+                }
+            }
+        },
+        "builtins": {
+            "patterns": [
+                {
+                    "match": "\\b(true|false)\\b",
+                    "name": "constant.language.boolean.solidity"
+                },
+                {
+                    "match": "\\b(seconds|minutes|hours|days|weeks)\\b",
+                    "name": "constant.language.time.solidity"
+                },
+                {
+                    "match": "\\byears\\b",
+                    "name": "invalid.deprecated.unit.solidity"
+                },
+                {
+                    "match": "\\b(wei|gwei|ether)\\b",
+                    "name": "constant.language.currency.solidity"
+                },
+                {
+                    "match": "\\b(szabo|finney)\\b",
+                    "name": "invalid.deprecated.unit.solidity"
+                },
+                {
+                    "match": "\\b(now)\\b",
+                    "name": "invalid.deprecated.variable.solidity"
+                },
+                {
+                    "match": "\\b(msg)\\.(sender|value|data|sig)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "variable.other.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(tx)\\.(origin|gasprice)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "variable.other.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(block)\\.(basefee|blobbasefee|chainid|coinbase|gaslimit|number|prevrandao|timestamp)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "variable.other.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(block)\\.(difficulty)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "invalid.deprecated.property.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(abi)\\.(decode|encode|encodePacked|encodeWithSelector|encodeWithSignature|encodeCall)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "support.function.builtin.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(bytes|string)\\.(concat)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "support.type.primitive.solidity"
+                        },
+                        "2": {
+                            "name": "support.function.builtin.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(this)\\b",
+                    "name": "variable.language.this.solidity"
+                },
+                {
+                    "match": "\\b(super)\\b",
+                    "name": "variable.language.super.solidity"
+                },
+                {
+                    "match": "\\b(msg|block|tx|abi)\\b",
+                    "name": "variable.language.builtin.solidity"
+                },
+                {
+                    "match": "\\b(type)\\b(?=\\s*\\()",
+                    "name": "support.function.type.solidity"
+                },
+                {
+                    "match": "\\b(payable)\\b(?=\\s*\\()",
+                    "name": "support.function.type.solidity"
+                },
+                {
+                    "match": "\\b(require|assert)\\b(?=\\s*\\()",
+                    "name": "support.function.exception.solidity"
+                },
+                {
+                    "match": "\\b(revert)\\b(?=\\s*\\()",
+                    "name": "support.function.exception.solidity"
+                },
+                {
+                    "match": "\\b(selfdestruct)\\b(?=\\s*\\()",
+                    "name": "invalid.deprecated.function.solidity"
+                },
+                {
+                    "match": "\\b(addmod|mulmod|keccak256|sha256|ripemd160|ecrecover)\\b(?=\\s*\\()",
+                    "name": "support.function.crypto.solidity"
+                },
+                {
+                    "match": "\\b(sha3)\\b(?=\\s*\\()",
+                    "name": "invalid.deprecated.function.solidity"
+                },
+                {
+                    "match": "\\b(blockhash|blobhash|gasleft)\\b(?=\\s*\\()",
+                    "name": "support.function.builtin.solidity"
+                },
+                {
+                    "match": "(\\.)\\s*(send|transfer)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.accessor.dot.solidity"
+                        },
+                        "2": {
+                            "name": "invalid.deprecated.function.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "(\\.)\\s*(call|delegatecall|staticcall)\\b(?=\\s*\\()",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.accessor.dot.solidity"
+                        },
+                        "2": {
+                            "name": "support.function.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "(\\.)\\s*(balance|code|codehash)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "punctuation.accessor.dot.solidity"
+                        },
+                        "2": {
+                            "name": "variable.other.member.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(msg)\\.(gas)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "invalid.deprecated.property.solidity"
+                        }
+                    }
+                },
+                {
+                    "match": "\\b(block)\\.(blockhash)\\b",
+                    "captures": {
+                        "1": {
+                            "name": "variable.language.builtin.solidity"
+                        },
+                        "2": {
+                            "name": "invalid.deprecated.property.solidity"
+                        }
+                    }
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "match": "(=>)",
+                    "name": "keyword.operator.mapping.solidity"
+                },
+                {
+                    "match": "(\\+\\+|--)",
+                    "name": "keyword.operator.increment-decrement.solidity"
+                },
+                {
+                    "match": "(\\*\\*)",
+                    "name": "keyword.operator.exponent.solidity"
+                },
+                {
+                    "match": "(<<=|>>=|>>>=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=)",
+                    "name": "keyword.operator.assignment.solidity"
+                },
+                {
+                    "match": "(==|!=|<=|>=|<|>)",
+                    "name": "keyword.operator.comparison.solidity"
+                },
+                {
+                    "match": "(&&|\\|\\|)",
+                    "name": "keyword.operator.logical.solidity"
+                },
+                {
+                    "match": "(!)",
+                    "name": "keyword.operator.logical.not.solidity"
+                },
+                {
+                    "match": "(>>>|<<|>>|~|&|\\||\\^)",
+                    "name": "keyword.operator.bitwise.solidity"
+                },
+                {
+                    "match": "([+\\-*/%])",
+                    "name": "keyword.operator.arithmetic.solidity"
+                },
+                {
+                    "match": "(\\?|:)",
+                    "name": "keyword.operator.ternary.solidity"
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "match": ";",
+                    "name": "punctuation.terminator.statement.solidity"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.solidity"
+                },
+                {
+                    "match": "\\.",
+                    "name": "punctuation.accessor.dot.solidity"
+                },
+                {
+                    "match": "\\{",
+                    "name": "punctuation.brace.curly.begin.solidity"
+                },
+                {
+                    "match": "\\}",
+                    "name": "punctuation.brace.curly.end.solidity"
+                },
+                {
+                    "match": "\\[",
+                    "name": "punctuation.bracket.square.begin.solidity"
+                },
+                {
+                    "match": "\\]",
+                    "name": "punctuation.bracket.square.end.solidity"
+                },
+                {
+                    "match": "\\(",
+                    "name": "punctuation.parameters.begin.solidity"
+                },
+                {
+                    "match": "\\)",
+                    "name": "punctuation.parameters.end.solidity"
+                }
+            ]
+        },
+        "function-call": {
+            "match": "\\b([A-Za-z_]\\w*)\\b\\s*(\\()",
+            "captures": {
+                "1": {
+                    "name": "entity.name.function.call.solidity"
+                },
+                "2": {
+                    "name": "punctuation.parameters.begin.solidity"
+                }
+            }
+        }
+    }
+}
