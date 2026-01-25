@@ -570,7 +570,7 @@ mod tests {
         let result = timeout(Duration::from_millis(50), task)
             .await
             .expect("abortable should resolve");
-        assert!(matches!(result.expect("join"), Err(_)));
+        assert!(result.expect("join").is_err());
     }
 
     #[test]

@@ -153,7 +153,9 @@ fn record_event(path: &Path, request: &'static str, duration: Duration) {
     let mut guard = match lock.lock() {
         Ok(guard) => guard,
         Err(error) => {
-            warn!(?error, "profile lock poisoned");
+            if !cfg!(test) {
+                warn!(?error, "profile lock poisoned");
+            }
             let guard = error.into_inner();
             lock.clear_poison();
             guard
@@ -172,11 +174,9 @@ fn record_event(path: &Path, request: &'static str, duration: Duration) {
     };
 
     if let Err(error) = writeln!(file, "{payload}") {
-        warn!(?error, "failed to write profile event");
-        // If `writeln!(file, "{payload}")` fails, log it, call `open_profile_file(path)` to
-        // get `reopened`, retry once, and only then set `guard.file = Some(reopened)`; on
-        // retry failure we return without restoring `guard.file` so subsequent calls open
-        // a fresh `file`.
+        // If `writeln!(file, "{payload}")` fails, call `open_profile_file(path)` to get
+        // `reopened`, retry once, and only then log on retry failure. On retry failure we
+        // return without restoring `guard.file` so subsequent calls open a fresh `file`.
         let mut reopened = match open_profile_file(path) {
             Ok(reopened) => reopened,
             Err(error) => {
@@ -184,8 +184,9 @@ fn record_event(path: &Path, request: &'static str, duration: Duration) {
                 return;
             }
         };
-        if let Err(error) = writeln!(reopened, "{payload}") {
+        if let Err(retry_error) = writeln!(reopened, "{payload}") {
             warn!(?error, "failed to write profile event");
+            warn!(?retry_error, "failed to write profile event after reopen");
             return;
         }
         guard.file = Some(reopened);
@@ -285,15 +286,14 @@ mod tests {
         let path = temp.path().join("profile.jsonl");
         fs::write(&path, "").expect("create file");
 
-        let mut perms = fs::metadata(&path).expect("metadata").permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(&path, perms).expect("set readonly");
+        let original_perms = fs::metadata(&path).expect("metadata").permissions();
+        let mut readonly_perms = original_perms.clone();
+        readonly_perms.set_readonly(true);
+        fs::set_permissions(&path, readonly_perms).expect("set readonly");
 
         let file = File::open(&path).expect("open readonly");
 
-        let mut perms = fs::metadata(&path).expect("metadata").permissions();
-        perms.set_readonly(false);
-        fs::set_permissions(&path, perms).expect("set writable");
+        fs::set_permissions(&path, original_perms).expect("set writable");
 
         let lock = PROFILE_LOCK.get_or_init(|| Mutex::new(ProfileState::default()));
         {

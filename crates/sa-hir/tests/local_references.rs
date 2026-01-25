@@ -33,8 +33,7 @@ fn ident_ranges(text: &str, ident: &str) -> Vec<TextRange> {
         let end = idx + ident.len();
         let before = start.checked_sub(1).and_then(|i| bytes.get(i));
         let after = bytes.get(end);
-        if before.map_or(true, |b| !is_ident_byte(*b)) && after.map_or(true, |b| !is_ident_byte(*b))
-        {
+        if before.is_none_or(|b| !is_ident_byte(*b)) && after.is_none_or(|b| !is_ident_byte(*b)) {
             ranges.push(TextRange::new(
                 TextSize::from(start as u32),
                 TextSize::from(end as u32),

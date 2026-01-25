@@ -54,6 +54,12 @@ impl ToolchainTestEnv {
     }
 }
 
+impl Default for ToolchainTestEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn toml_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "\\\\")
 }
