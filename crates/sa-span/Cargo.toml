@@ -1,0 +1,10 @@
+[package]
+name = "sa-span"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lsp-types = "0.94"
+
+[lib]
+path = "src/lib.rs"

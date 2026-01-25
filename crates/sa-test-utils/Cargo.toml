@@ -1,0 +1,19 @@
+[package]
+name = "sa-test-utils"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+sa-config = { path = "../sa-config" }
+sa-ide = { path = "../sa-ide" }
+sa-load-foundry = { path = "../sa-load-foundry" }
+sa-paths = { path = "../sa-paths" }
+sa-test-support = { path = "../sa-test-support" }
+sa-vfs = { path = "../sa-vfs" }
+tempfile = "3"
+walkdir = "2"
+
+[dev-dependencies]
+sa-span = { path = "../sa-span" }

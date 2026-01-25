@@ -1,0 +1,15 @@
+{
+  "errors": [
+    {
+      "sourceLocation": { "file": "src/Main.sol", "start": 0, "end": 5 },
+      "type": "ParserError",
+      "component": "general",
+      "severity": "error",
+      "errorCode": "1234",
+      "message": "stub error",
+      "formattedMessage": "ParserError: stub error"
+    }
+  ],
+  "sources": {},
+  "contracts": {}
+}

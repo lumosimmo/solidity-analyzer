@@ -1,0 +1,14 @@
+[package]
+name = "sa-base-db"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+salsa = "0.25"
+sa-config = { path = "../sa-config" }
+sa-project-model = { path = "../sa-project-model" }
+sa-paths = { path = "../sa-paths" }
+sa-vfs = { path = "../sa-vfs" }
+
+[lib]
+path = "src/lib.rs"

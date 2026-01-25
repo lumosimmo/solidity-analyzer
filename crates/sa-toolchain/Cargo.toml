@@ -1,0 +1,21 @@
+[package]
+name = "sa-toolchain"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
+sa-config = { path = "../sa-config" }
+sa-project-model = { path = "../sa-project-model" }
+semver = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+sa-paths = { path = "../sa-paths" }
+sa-test-support = { path = "../sa-test-support" }
+sa-test-utils = { path = "../sa-test-utils" }
+tempfile = "3"
+
+[lib]
+path = "src/lib.rs"

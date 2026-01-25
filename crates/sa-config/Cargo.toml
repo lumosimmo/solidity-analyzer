@@ -1,0 +1,19 @@
+[package]
+name = "sa-config"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+foundry-config = { workspace = true }
+foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
+sa-project-model = { path = "../sa-project-model" }
+solar-config = { workspace = true }
+
+[dev-dependencies]
+sa-paths = { path = "../sa-paths" }
+sa-test-support = { path = "../sa-test-support" }
+sa-test-utils = { path = "../sa-test-utils" }
+tempfile = "3"
+
+[lib]
+path = "src/lib.rs"

@@ -1,0 +1,11 @@
+[package]
+name = "sa-ide-assists"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sa-base-db = { path = "../sa-base-db" }
+sa-span = { path = "../sa-span" }
+
+[lib]
+path = "src/lib.rs"

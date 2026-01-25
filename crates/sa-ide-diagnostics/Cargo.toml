@@ -1,0 +1,26 @@
+[package]
+name = "sa-ide-diagnostics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+forge-lint = { workspace = true }
+foundry-common = { workspace = true }
+foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
+sa-config = { path = "../sa-config" }
+sa-ide-assists = { path = "../sa-ide-assists" }
+sa-paths = { path = "../sa-paths" }
+sa-project-model = { path = "../sa-project-model" }
+sa-sema = { path = "../sa-sema" }
+sa-span = { path = "../sa-span" }
+sa-vfs = { path = "../sa-vfs" }
+solar = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+sa-test-utils = { path = "../sa-test-utils" }
+tempfile = "3"
+
+[lib]
+path = "src/lib.rs"

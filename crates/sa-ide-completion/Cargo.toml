@@ -1,0 +1,20 @@
+[package]
+name = "sa-ide-completion"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sa-base-db = { path = "../sa-base-db" }
+sa-def = { path = "../sa-def" }
+sa-hir = { path = "../sa-hir" }
+sa-paths = { path = "../sa-paths" }
+sa-project-model = { path = "../sa-project-model" }
+sa-span = { path = "../sa-span" }
+sa-sema = { path = "../sa-sema" }
+sa-syntax = { path = "../sa-syntax" }
+
+[dev-dependencies]
+sa-test-support = { path = "../sa-test-support" }
+
+[lib]
+path = "src/lib.rs"

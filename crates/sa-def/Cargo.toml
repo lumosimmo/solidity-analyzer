@@ -1,0 +1,15 @@
+[package]
+name = "sa-def"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sa-base-db = { path = "../sa-base-db" }
+sa-intern = { path = "../sa-intern" }
+sa-span = { path = "../sa-span" }
+sa-syntax = { path = "../sa-syntax" }
+solar-ast = { workspace = true }
+tracing = "0.1"
+
+[lib]
+path = "src/lib.rs"

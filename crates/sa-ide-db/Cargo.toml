@@ -1,0 +1,22 @@
+[package]
+name = "sa-ide-db"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+salsa = "0.25"
+sa-base-db = { path = "../sa-base-db" }
+sa-def = { path = "../sa-def" }
+sa-hir = { path = "../sa-hir" }
+sa-sema = { path = "../sa-sema" }
+sa-span = { path = "../sa-span" }
+sa-syntax = { path = "../sa-syntax" }
+
+[dev-dependencies]
+sa-paths = { path = "../sa-paths" }
+sa-project-model = { path = "../sa-project-model" }
+sa-vfs = { path = "../sa-vfs" }
+sa-test-support = { path = "../sa-test-support" }
+
+[lib]
+path = "src/lib.rs"

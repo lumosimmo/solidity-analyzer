@@ -1,0 +1,12 @@
+[package]
+name = "sa-project-model"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sa-paths = { path = "../sa-paths" }
+anyhow = "1"
+foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
+
+[lib]
+path = "src/lib.rs"

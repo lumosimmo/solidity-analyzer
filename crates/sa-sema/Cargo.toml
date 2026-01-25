@@ -1,0 +1,24 @@
+[package]
+name = "sa-sema"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+salsa = "0.25"
+sa-base-db = { path = "../sa-base-db" }
+sa-config = { path = "../sa-config" }
+sa-paths = { path = "../sa-paths" }
+sa-project-model = { path = "../sa-project-model" }
+sa-span = { path = "../sa-span" }
+sa-syntax = { path = "../sa-syntax" }
+sa-vfs = { path = "../sa-vfs" }
+solar = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+sa-test-support = { path = "../sa-test-support" }
+sa-test-utils = { path = "../sa-test-utils" }
+
+[lib]
+path = "src/lib.rs"

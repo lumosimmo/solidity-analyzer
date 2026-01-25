@@ -1,0 +1,30 @@
+[package]
+name = "sa-ide"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+forge-fmt = { workspace = true }
+heck = "0.5"
+sa-base-db = { path = "../sa-base-db" }
+sa-config = { path = "../sa-config" }
+sa-def = { path = "../sa-def" }
+sa-hir = { path = "../sa-hir" }
+sa-ide-assists = { path = "../sa-ide-assists" }
+sa-ide-completion = { path = "../sa-ide-completion" }
+sa-ide-db = { path = "../sa-ide-db" }
+sa-paths = { path = "../sa-paths" }
+sa-project-model = { path = "../sa-project-model" }
+sa-sema = { path = "../sa-sema" }
+sa-span = { path = "../sa-span" }
+sa-syntax = { path = "../sa-syntax" }
+sa-vfs = { path = "../sa-vfs" }
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+sa-test-support = { path = "../sa-test-support" }
+sa-test-utils = { path = "../sa-test-utils" }
+
+[lib]
+path = "src/lib.rs"
