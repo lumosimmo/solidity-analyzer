@@ -6009,6 +6009,7 @@ name = "solidity-analyzer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "foundry-compilers",
  "futures",
  "sa-config",
  "sa-def",

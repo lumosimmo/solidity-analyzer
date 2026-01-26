@@ -1,10 +1,18 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+use foundry_compilers::{
+    Language, ProjectPathsConfig,
+    artifacts::sources::{Source, Sources},
+    resolver::{Graph, parse::SolParser},
+    solc::SolcLanguage,
+};
 use sa_paths::NormalizedPath;
 use sa_project_model::{
-    FoundryResolver, FoundryWorkspace, ResolvedImport, resolve_import_path_with_resolver,
+    FoundryResolver, FoundryWorkspace, ResolvedImport, project_paths_from_config,
+    resolve_import_path_with_resolver,
 };
 use tracing::{debug, warn};
 
@@ -35,55 +43,20 @@ pub fn index_workspace(
     workspace: &FoundryWorkspace,
     profile: Option<&str>,
 ) -> anyhow::Result<IndexResult> {
-    let resolver = FoundryResolver::new(workspace, profile)?;
     let mut result = IndexResult::default();
-    let mut seen = HashSet::new();
-    let mut queue = VecDeque::new();
-    // Cache for file existence checks to avoid repeated stat calls.
-    let mut file_exists_cache: HashMap<String, bool> = HashMap::new();
+    let resolved_profile = workspace.profile(profile);
+    let paths = project_paths_from_config(workspace, resolved_profile.remappings())
+        .with_context(|| "indexer: failed to build project paths")?;
+    let sol_paths = paths.with_language::<SolcLanguage>();
+    let sources = read_input_files_lenient(&sol_paths);
+    let graph = Graph::<SolParser>::resolve_sources(&sol_paths, sources)
+        .with_context(|| "indexer: failed to resolve workspace sources")?;
 
-    for root in [workspace.src(), workspace.test(), workspace.script()] {
-        let root_path = PathBuf::from(root.as_str());
-        for entry in collect_solidity_files(&root_path)? {
-            let normalized = NormalizedPath::new(entry.to_string_lossy());
-            let key = normalized.as_str().to_string();
-            file_exists_cache.insert(key, true);
-            if seen.insert(normalized.clone()) {
-                queue.push_back(normalized);
-            }
-        }
-    }
-
-    while let Some(path) = queue.pop_front() {
-        let text = match fs::read_to_string(path.as_str()) {
-            Ok(text) => text,
-            Err(error) => {
-                debug!(?error, path = %path, "indexer: failed to read file");
-                continue;
-            }
-        };
-
-        for resolved in resolved_import_paths(
-            workspace,
-            &resolver,
-            &path,
-            &text,
-            ImportParseFallback::Disabled,
-        ) {
-            let resolved_str = resolved.as_str().to_string();
-            let exists = *file_exists_cache
-                .entry(resolved_str.clone())
-                .or_insert_with(|| PathBuf::from(&resolved_str).is_file());
-            if !exists {
-                continue;
-            }
-            if seen.insert(resolved.clone()) {
-                queue.push_back(resolved);
-            }
-        }
-
-        // Store the file with its content.
-        result.files.push(IndexedFile { path, text });
+    for node in &graph.nodes {
+        result.files.push(IndexedFile {
+            path: NormalizedPath::new(node.path().to_string_lossy()),
+            text: node.content().to_string(),
+        });
     }
 
     result
@@ -122,13 +95,7 @@ pub fn index_open_file_imports(
             },
         };
 
-        for resolved in resolved_import_paths(
-            workspace,
-            &resolver,
-            &path,
-            &text,
-            ImportParseFallback::OpenBuffer,
-        ) {
+        for resolved in resolved_import_paths(workspace, &resolver, &path, &text, true) {
             let resolved = lsp_utils::normalize_path(Path::new(resolved.as_str()));
             if !PathBuf::from(resolved.as_str()).is_file() {
                 continue;
@@ -147,24 +114,12 @@ pub fn index_open_file_imports(
     Ok(result)
 }
 
-#[derive(Clone, Copy)]
-enum ImportParseFallback {
-    Disabled,
-    OpenBuffer,
-}
-
-impl ImportParseFallback {
-    fn allow_solar_fallback(self) -> bool {
-        matches!(self, ImportParseFallback::OpenBuffer)
-    }
-}
-
 fn resolved_import_paths(
     workspace: &FoundryWorkspace,
     resolver: &FoundryResolver,
     current_path: &NormalizedPath,
     text: &str,
-    fallback: ImportParseFallback,
+    allow_solar_fallback: bool,
 ) -> Vec<NormalizedPath> {
     match resolver.resolved_imports(current_path, text) {
         Ok(imports) => resolved_imports_with_resolver(workspace, resolver, current_path, imports),
@@ -174,7 +129,7 @@ fn resolved_import_paths(
                 path = %current_path,
                 "indexer: failed to parse imports with foundry parser"
             );
-            if fallback.allow_solar_fallback() {
+            if allow_solar_fallback {
                 sa_syntax::parse_imports(text)
                     .into_iter()
                     .filter_map(|path| {
@@ -214,84 +169,24 @@ fn resolved_imports_with_resolver(
         .collect()
 }
 
-fn collect_solidity_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
+fn read_input_files_lenient<Lang>(paths: &ProjectPathsConfig<Lang>) -> Sources
+where
+    Lang: Language,
+{
+    let mut sources = Sources::new();
 
-    let mut files = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    // Track visited directories by canonical path to avoid symlink loops.
-    let mut visited_dirs: HashSet<PathBuf> = HashSet::new();
-
-    // Canonicalize and track the root directory.
-    match fs::canonicalize(root) {
-        Ok(canonical_root) => {
-            visited_dirs.insert(canonical_root);
-        }
-        Err(error) => {
-            warn!(
-                ?error,
-                root = %root.display(),
-                "indexer: failed to canonicalize root directory, symlink loop detection may be impacted"
-            );
-        }
-    }
-
-    while let Some(dir) = stack.pop() {
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
+    for file in paths.input_files_iter() {
+        match Source::read(&file) {
+            Ok(source) => {
+                sources.insert(file.to_path_buf(), source);
+            }
             Err(error) => {
-                warn!(?error, dir = %dir.display(), "indexer: failed to read directory");
-                continue;
-            }
-        };
-
-        let mut sorted_entries = Vec::new();
-        for entry in entries {
-            match entry {
-                Ok(e) => sorted_entries.push(e),
-                Err(error) => {
-                    warn!(?error, dir = %dir.display(), "indexer: failed to read directory entry");
-                    continue;
-                }
-            }
-        }
-        sorted_entries.sort_by_key(|entry| entry.path());
-
-        for entry in sorted_entries {
-            let path = entry.path();
-            let metadata = match entry.metadata() {
-                Ok(m) => m,
-                Err(error) => {
-                    warn!(?error, path = %path.display(), "indexer: failed to read metadata");
-                    continue;
-                }
-            };
-
-            if metadata.is_dir() {
-                // Check for symlink loops by canonicalizing the path.
-                match fs::canonicalize(&path) {
-                    Ok(canonical) => {
-                        if visited_dirs.insert(canonical) {
-                            stack.push(path);
-                        } else {
-                            debug!(path = %path.display(), "indexer: skipping already-visited directory (symlink loop)");
-                        }
-                    }
-                    Err(error) => {
-                        warn!(?error, path = %path.display(), "indexer: failed to canonicalize directory");
-                        continue;
-                    }
-                }
-            } else if metadata.is_file() && path.extension().is_some_and(|ext| ext == "sol") {
-                files.push(path);
+                warn!(?error, path = %file.display(), "indexer: failed to read input file");
             }
         }
     }
 
-    files.sort();
-    Ok(files)
+    sources
 }
 
 #[cfg(test)]
@@ -397,6 +292,96 @@ contract Unused {}
     }
 
     #[test]
+    fn indexer_handles_unresolved_imports_without_failing() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+
+        fs::create_dir_all(root.join("src")).expect("src dir");
+
+        let main_text = r#"
+import "./Missing.sol";
+contract Main {}
+"#;
+        let main_path = root.join("src/Main.sol");
+        fs::write(&main_path, main_text).expect("write main");
+
+        let root_path = NormalizedPath::new(root.to_string_lossy());
+        let profile = FoundryProfile::new("default");
+        let workspace = FoundryWorkspace::new(root_path, profile);
+
+        let result = index_workspace(&workspace, None).expect("index workspace");
+
+        assert!(result_contains_path(
+            &result,
+            &NormalizedPath::new(main_path.to_string_lossy())
+        ));
+        assert_eq!(result.files.len(), 1);
+    }
+
+    #[test]
+    fn indexer_resolves_absolute_imports_under_src() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+
+        fs::create_dir_all(root.join("src")).expect("src dir");
+
+        let dep_text = "contract Dep {}";
+        let dep_path = root.join("src/Dep.sol");
+        fs::write(&dep_path, dep_text).expect("write dep");
+
+        let main_text = r#"
+import "src/Dep.sol";
+contract Main { Dep dep; }
+"#;
+        let main_path = root.join("src/Main.sol");
+        fs::write(&main_path, main_text).expect("write main");
+
+        let root_path = NormalizedPath::new(root.to_string_lossy());
+        let profile = FoundryProfile::new("default");
+        let workspace = FoundryWorkspace::new(root_path, profile);
+
+        let result = index_workspace(&workspace, None).expect("index workspace");
+
+        assert!(result_contains_path(
+            &result,
+            &NormalizedPath::new(main_path.to_string_lossy())
+        ));
+        assert!(result_contains_path(
+            &result,
+            &NormalizedPath::new(dep_path.to_string_lossy())
+        ));
+    }
+
+    #[test]
+    fn indexer_skips_unreadable_sources() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+
+        fs::create_dir_all(root.join("src")).expect("src dir");
+
+        let good_path = root.join("src/Good.sol");
+        fs::write(&good_path, "contract Good {}").expect("write good");
+
+        let bad_path = root.join("src/Bad.sol");
+        fs::write(&bad_path, [0xff, 0xfe, 0xfd]).expect("write bad");
+
+        let root_path = NormalizedPath::new(root.to_string_lossy());
+        let profile = FoundryProfile::new("default");
+        let workspace = FoundryWorkspace::new(root_path, profile);
+
+        let result = index_workspace(&workspace, None).expect("index workspace");
+
+        assert!(result_contains_path(
+            &result,
+            &NormalizedPath::new(good_path.to_string_lossy())
+        ));
+        assert!(!result_contains_path(
+            &result,
+            &NormalizedPath::new(bad_path.to_string_lossy())
+        ));
+    }
+
+    #[test]
     fn indexer_resolves_context_remapped_imports_for_open_file() {
         let temp = tempdir().expect("tempdir");
         let root = temp.path().canonicalize().expect("canonicalize root");
@@ -435,6 +420,45 @@ contract Thing {}
             &result,
             &NormalizedPath::new(root.join("lib/default/dep/Thing.sol").to_string_lossy())
         ));
+    }
+
+    #[test]
+    fn index_open_file_imports_use_open_buffer_text() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+
+        fs::create_dir_all(root.join("src")).expect("src dir");
+
+        let dep_text = "contract Dep {}";
+        let dep_path = root.join("src/Dep.sol");
+        fs::write(&dep_path, dep_text).expect("write dep");
+
+        let disk_text = "contract Main {}";
+        let open_text = r#"
+import "./Dep.sol";
+contract Main { Dep dep; }
+"#;
+        let main_path = root.join("src/Main.sol");
+        fs::write(&main_path, disk_text).expect("write main");
+
+        let root_path = NormalizedPath::new(root.to_string_lossy());
+        let profile = FoundryProfile::new("default");
+        let workspace = FoundryWorkspace::new(root_path, profile);
+        let open_path = NormalizedPath::new(main_path.to_string_lossy());
+
+        let result = super::index_open_file_imports(&workspace, None, &open_path, open_text)
+            .expect("index open file imports");
+
+        assert!(result_contains_path(
+            &result,
+            &NormalizedPath::new(dep_path.to_string_lossy())
+        ));
+        let main_entry = result
+            .files
+            .iter()
+            .find(|file| file.path == open_path)
+            .expect("main entry");
+        assert_eq!(main_entry.text, open_text);
     }
 
     #[test]
@@ -487,24 +511,6 @@ contract Main {}
             .to_string_lossy(),
         );
         assert!(resolved.iter().any(|path| path == &expected));
-    }
-
-    #[test]
-    fn collect_solidity_files_returns_empty_for_missing_root() {
-        let temp = tempdir().expect("tempdir");
-        let missing = temp.path().join("missing");
-        let files = super::collect_solidity_files(&missing).expect("collect files");
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn collect_solidity_files_handles_non_directory_root() {
-        let temp = tempdir().expect("tempdir");
-        let root_file = temp.path().join("NotADir.sol");
-        fs::write(&root_file, "contract NotADir {}").expect("write file");
-
-        let files = super::collect_solidity_files(&root_file).expect("collect files");
-        assert!(files.is_empty());
     }
 
     #[test]
