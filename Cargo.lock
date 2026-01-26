@@ -5250,6 +5250,7 @@ name = "sa-sema"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "foundry-compilers",
  "sa-base-db",
  "sa-config",
  "sa-paths",

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
 salsa = "0.25"
 sa-base-db = { path = "../sa-base-db" }
 sa-config = { path = "../sa-config" }

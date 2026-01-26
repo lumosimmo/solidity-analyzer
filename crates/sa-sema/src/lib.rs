@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
+use foundry_compilers::utils::canonicalize;
 use sa_base_db::{FileId, LanguageKind, ProjectInput, SaDatabase, SaDatabaseExt};
 use sa_config::{ResolvedFoundryConfig, solar_opts_from_config};
 use sa_paths::{NormalizedPath, WorkspacePath};
@@ -420,7 +421,7 @@ fn file_id_for_path(
     if let Some(file_id) = path_to_file_id.get(&normalized) {
         return Some(*file_id);
     }
-    let canonical = path.canonicalize().ok()?;
+    let canonical = canonicalize(path).ok()?;
     let normalized = NormalizedPath::new(canonical.to_string_lossy());
     path_to_file_id.get(&normalized).copied()
 }
@@ -451,7 +452,7 @@ impl VfsOverlayFileLoader {
             return normalized;
         }
 
-        let canonical = match path.canonicalize() {
+        let canonical = match canonicalize(path) {
             Ok(canonical) => canonical,
             Err(error) => {
                 warn!(path = %path.display(), error = %error, "Failed to canonicalize path");

@@ -168,6 +168,9 @@ mod tests {
         let path = NormalizedPath::new("/workspace//src/./contracts/../lib.sol");
         assert_eq!(path.as_str(), "/workspace/src/lib.sol");
 
+        let mixed = NormalizedPath::new("/workspace\\src/./contracts\\../lib.sol");
+        assert_eq!(mixed.as_str(), "/workspace/src/lib.sol");
+
         let windows_path = NormalizedPath::new("C:\\workspace\\src\\lib.sol");
         let expected = if cfg!(windows) {
             "c:/workspace/src/lib.sol"
@@ -193,6 +196,9 @@ mod tests {
             "//?/C:/Repo/src"
         };
         assert_eq!(extended.as_str(), expected_extended);
+
+        let extended_unc = NormalizedPath::new(r"\\?\UNC\server\share\dir");
+        assert_eq!(extended_unc.as_str(), "//?/UNC/server/share/dir");
     }
 
     #[test]

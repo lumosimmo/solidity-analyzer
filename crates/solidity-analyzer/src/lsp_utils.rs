@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use foundry_compilers::utils::canonicalize;
 use sa_paths::NormalizedPath;
 use tower_lsp::lsp_types::Url;
 
@@ -22,7 +23,7 @@ pub fn is_foundry_config_path(path: &NormalizedPath) -> bool {
 }
 
 pub fn normalize_path(path: &Path) -> NormalizedPath {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical = canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     NormalizedPath::new(canonical.to_string_lossy())
 }
 
@@ -147,6 +148,18 @@ mod tests {
 
         let normalized = url_to_path(&url).expect("normalized path");
         let expected = NormalizedPath::new(root.join("a/c/Main.sol").to_string_lossy());
+
+        assert_eq!(normalized.as_str(), expected.as_str());
+    }
+
+    #[test]
+    fn normalize_path_falls_back_without_fs() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+        let missing = root.join("missing/../virtual.sol");
+
+        let normalized = normalize_path(&missing);
+        let expected = NormalizedPath::new(root.join("virtual.sol").to_string_lossy());
 
         assert_eq!(normalized.as_str(), expected.as_str());
     }
