@@ -33,7 +33,7 @@
     },
     "main": "./out/main",
     "scripts": {
-        "vscode:prepublish": "bun run build-base -- --minify",
+        "vscode:prepublish": "bun run build",
         "build-base": "bun x esbuild src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node --target=node20",
         "build": "bun run build-base -- --sourcemap",
         "build-tests": "bun x esbuild tests/integration/index.ts --bundle --outfile=out/tests/integration/index.js --external:vscode --format=cjs --platform=node --target=node20",

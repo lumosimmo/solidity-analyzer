@@ -5,6 +5,13 @@ tsconfig*.json
 .eslintrc*
 .prettierrc*
 bun.lock
+.prettierignore
+eslint.config.mjs
+.vscode/**
+scripts/**
+node_modules/**
+out/tests/**
+*.vsix
 
 # Include server binary (negation)
 !server/**
