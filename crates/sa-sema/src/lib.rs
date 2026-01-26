@@ -16,6 +16,7 @@ use solar::interface::source_map::{FileLoader, SourceMap};
 use solar::interface::{Session, Span};
 use solar::sema::Compiler;
 use solar::sema::hir::SourceId;
+use solar::sema::{Gcx, hir};
 use tracing::{debug, warn};
 
 mod completion;
@@ -30,6 +31,12 @@ pub use completion::{SemaCompletionItem, SemaCompletionKind};
 pub use references::SemaReference;
 pub use resolve::{ResolveOutcome, ResolvedSymbol, ResolvedSymbolKind};
 pub use symbols::SemaSymbol;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemaFunctionSignature {
+    pub label: String,
+    pub parameters: Vec<String>,
+}
 
 #[salsa::db]
 pub trait SemaDatabase: SaDatabase + SaDatabaseExt {}
@@ -113,6 +120,44 @@ impl SemaSnapshot {
         Some(TextRange::new(start, end))
     }
 
+    pub fn function_signature_for_definition(
+        &self,
+        file_id: FileId,
+        name_range: TextRange,
+        name: &str,
+        container: Option<&str>,
+    ) -> Option<SemaFunctionSignature> {
+        self.with_gcx(|gcx| {
+            let item_id = self.item_id_for_name_range(gcx, file_id, name_range, name, container)?;
+            let hir::Item::Function(function) = gcx.hir.item(item_id) else {
+                return None;
+            };
+            Some(format_hir_function_signature(gcx, function))
+        })
+    }
+
+    pub fn variable_label_for_definition(
+        &self,
+        file_id: FileId,
+        name_range: TextRange,
+        name: &str,
+        container: Option<&str>,
+    ) -> Option<String> {
+        self.with_gcx(|gcx| {
+            let item_id = self.item_id_for_name_range(gcx, file_id, name_range, name, container)?;
+            let hir::Item::Variable(variable) = gcx.hir.item(item_id) else {
+                return None;
+            };
+            let ty = gcx.type_of_item(item_id);
+            let ty = ty.display(gcx).to_string();
+            let name = variable.name.map(|ident| ident.as_str().to_string());
+            Some(match name {
+                Some(name) => format!("{ty} {name}"),
+                None => ty,
+            })
+        })
+    }
+
     pub fn references_for_definition(
         &self,
         definition_file_id: FileId,
@@ -125,6 +170,152 @@ impl SemaSnapshot {
     fn reference_index(&self) -> &references::SemaReferenceIndex {
         self.reference_index
             .get_or_init(|| references::SemaReferenceIndex::new(self))
+    }
+
+    fn item_id_for_name_range(
+        &self,
+        gcx: Gcx<'_>,
+        file_id: FileId,
+        name_range: TextRange,
+        name: &str,
+        container: Option<&str>,
+    ) -> Option<hir::ItemId> {
+        let source_id = self.source_id_for_file(file_id)?;
+        let source = gcx.hir.source(source_id);
+        let mut name_matches = Vec::new();
+        let mut items: Vec<hir::ItemId> = Vec::new();
+
+        if let Some(container_name) = container {
+            let contract_id = source.items.iter().find_map(|item_id| {
+                let contract_id = item_id.as_contract()?;
+                let contract = gcx.hir.contract(contract_id);
+                (contract.name.as_str() == container_name).then_some(contract_id)
+            })?;
+            let contract = gcx.hir.contract(contract_id);
+            items.extend(contract.items.iter().copied());
+            if let Some(ctor) = contract.ctor {
+                items.push(ctor.into());
+            }
+            if let Some(fallback) = contract.fallback {
+                items.push(fallback.into());
+            }
+            if let Some(receive) = contract.receive {
+                items.push(receive.into());
+            }
+        } else {
+            items.extend(source.items.iter().copied());
+        }
+
+        for item_id in items {
+            let item = gcx.hir.item(item_id);
+            let Some(item_range) = self.item_name_range(item) else {
+                continue;
+            };
+            if item_range != name_range {
+                if self.item_matches_name(item, name)
+                    && self.item_matches_container(gcx, item, container)
+                {
+                    name_matches.push(item_id);
+                }
+                continue;
+            }
+            if !self.item_matches_container(gcx, item, container) {
+                continue;
+            }
+            return Some(item_id);
+        }
+        if name_matches.len() == 1 {
+            return Some(name_matches[0]);
+        }
+        None
+    }
+
+    fn item_name_range(&self, item: hir::Item<'_, '_>) -> Option<TextRange> {
+        match item {
+            hir::Item::Function(function) => {
+                let span = function
+                    .name
+                    .map(|name| name.span)
+                    .unwrap_or_else(|| function.keyword_span());
+                self.span_to_text_range(span)
+            }
+            _ => item
+                .name()
+                .and_then(|name| self.span_to_text_range(name.span)),
+        }
+    }
+
+    fn item_matches_container(
+        &self,
+        gcx: Gcx<'_>,
+        item: hir::Item<'_, '_>,
+        container: Option<&str>,
+    ) -> bool {
+        match (container, item.contract()) {
+            (Some(container), Some(contract_id)) => {
+                gcx.hir.contract(contract_id).name.as_str() == container
+            }
+            (Some(_), None) => false,
+            (None, Some(_)) => false,
+            (None, None) => true,
+        }
+    }
+
+    fn item_matches_name(&self, item: hir::Item<'_, '_>, name: &str) -> bool {
+        match item {
+            hir::Item::Function(function) => match function.name {
+                Some(ident) => ident.as_str() == name,
+                None => function.kind.to_str() == name,
+            },
+            _ => item.name().is_some_and(|ident| ident.as_str() == name),
+        }
+    }
+}
+
+fn format_hir_function_signature<'gcx>(
+    gcx: Gcx<'gcx>,
+    function: &hir::Function<'gcx>,
+) -> SemaFunctionSignature {
+    let mut signature = String::new();
+    signature.push_str(function.kind.to_str());
+    if let Some(name) = function.name {
+        signature.push(' ');
+        signature.push_str(name.as_str());
+    }
+
+    let parameters = function
+        .parameters
+        .iter()
+        .map(|&var_id| format_hir_param(gcx, var_id))
+        .collect::<Vec<_>>();
+    signature.push('(');
+    signature.push_str(&parameters.join(", "));
+    signature.push(')');
+
+    let returns = function
+        .returns
+        .iter()
+        .map(|&var_id| format_hir_param(gcx, var_id))
+        .collect::<Vec<_>>();
+    if !returns.is_empty() {
+        signature.push_str(" returns (");
+        signature.push_str(&returns.join(", "));
+        signature.push(')');
+    }
+
+    SemaFunctionSignature {
+        label: signature,
+        parameters,
+    }
+}
+
+fn format_hir_param<'gcx>(gcx: Gcx<'gcx>, var_id: hir::VariableId) -> String {
+    let var = gcx.hir.variable(var_id);
+    let ty = gcx.type_of_item(var_id.into());
+    let ty = ty.display(gcx).to_string();
+    match var.name {
+        Some(name) => format!("{ty} {}", name.as_str()),
+        None => ty,
     }
 }
 

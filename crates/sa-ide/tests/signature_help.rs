@@ -41,6 +41,31 @@ fn signature_help_returns_function_signature_and_docs() {
 }
 
 #[test]
+fn signature_help_uses_sema_type_printer() {
+    let (text, offset) = extract_offset(
+        r#"contract Foo {
+    function cast(uint value) public returns (uint) { return value; }
+
+    function test() public { cast(/*caret*/1); }
+}"#,
+    );
+    let path = NormalizedPath::new("/workspace/src/Main.sol");
+    let (analysis, snapshot) = setup_analysis(vec![(path.clone(), text)], vec![]);
+    let file_id = snapshot.file_id(&path).expect("file id");
+
+    let SignatureHelp { signatures, .. } = analysis
+        .signature_help(file_id, offset)
+        .expect("signature help");
+
+    let signature = &signatures[0];
+    assert_eq!(
+        signature.label,
+        "function cast(uint256 value) returns (uint256)"
+    );
+    assert_eq!(signature.parameters[0].label, "uint256 value");
+}
+
+#[test]
 fn signature_help_clamps_active_parameter_to_last() {
     // Test that when cursor is past the last argument, active_parameter is clamped
     let (text, offset) = extract_offset(

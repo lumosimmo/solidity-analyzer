@@ -8,7 +8,8 @@ use sa_syntax::{
 };
 
 use crate::syntax_utils::{
-    docs_for_item_with_inheritdoc, find_item_by_name_range, format_function_signature, format_param,
+    docs_for_item_with_inheritdoc, find_item_by_name_range, format_function_signature,
+    format_param, sema_function_signature_for_entry,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,16 +66,27 @@ pub fn signature_help(
         return None;
     };
 
-    let label = format_function_signature(&parse, def_text.as_ref(), function);
-    let parameters = function
-        .header
-        .parameters
-        .vars
-        .iter()
-        .map(|param| ParameterInformation {
-            label: format_param(&parse, def_text.as_ref(), param),
-        })
-        .collect::<Vec<_>>();
+    let sema_signature = sema_function_signature_for_entry(db, project_id, entry);
+    let (label, parameters) = if let Some(signature) = sema_signature {
+        let parameters = signature
+            .parameters
+            .into_iter()
+            .map(|label| ParameterInformation { label })
+            .collect::<Vec<_>>();
+        (signature.label, parameters)
+    } else {
+        let label = format_function_signature(&parse, def_text.as_ref(), function);
+        let parameters = function
+            .header
+            .parameters
+            .vars
+            .iter()
+            .map(|param| ParameterInformation {
+                label: format_param(&parse, def_text.as_ref(), param),
+            })
+            .collect::<Vec<_>>();
+        (label, parameters)
+    };
     let documentation = docs_for_item_with_inheritdoc(
         db,
         project_id,

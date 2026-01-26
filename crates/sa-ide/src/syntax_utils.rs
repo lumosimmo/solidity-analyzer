@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use sa_base_db::{FileId, ProjectId};
 use sa_def::{DefEntry, DefKind};
 use sa_hir::{HirDatabase, lowered_program};
-use sa_sema::sema_snapshot_for_project;
+use sa_sema::{SemaFunctionSignature, sema_snapshot_for_project};
 use sa_span::TextRange;
 use sa_syntax::{
     Parse,
@@ -105,6 +105,38 @@ pub fn type_text(parse: &Parse, text: &str, ty: &Type<'_>) -> Option<String> {
     let start = usize::from(range.start());
     let end = usize::from(range.end());
     text.get(start..end).map(|slice| slice.trim().to_string())
+}
+
+pub fn sema_function_signature_for_entry(
+    db: &dyn HirDatabase,
+    project_id: ProjectId,
+    entry: &DefEntry,
+) -> Option<SemaFunctionSignature> {
+    let project = db.project_input(project_id);
+    let snapshot = sema_snapshot_for_project(db, project);
+    let snapshot = snapshot.for_file(entry.location().file_id())?;
+    snapshot.function_signature_for_definition(
+        entry.location().file_id(),
+        entry.location().range(),
+        entry.location().name(),
+        entry.container(),
+    )
+}
+
+pub fn sema_variable_label_for_entry(
+    db: &dyn HirDatabase,
+    project_id: ProjectId,
+    entry: &DefEntry,
+) -> Option<String> {
+    let project = db.project_input(project_id);
+    let snapshot = sema_snapshot_for_project(db, project);
+    let snapshot = snapshot.for_file(entry.location().file_id())?;
+    snapshot.variable_label_for_definition(
+        entry.location().file_id(),
+        entry.location().range(),
+        entry.location().name(),
+        entry.container(),
+    )
 }
 
 /// Extracts documentation comments from an AST item.

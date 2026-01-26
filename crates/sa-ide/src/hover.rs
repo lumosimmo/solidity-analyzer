@@ -10,7 +10,7 @@ use sa_syntax::{
 
 use crate::syntax_utils::{
     docs_for_item_with_inheritdoc, find_item_by_name_range, format_function_signature,
-    format_param, type_text,
+    format_param, sema_function_signature_for_entry, sema_variable_label_for_entry, type_text,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +39,7 @@ pub fn hover(
             let text = db.file_input(def_file_id).text(db);
             let parse = sa_syntax::parse_file(text.as_ref());
 
-            let label = build_label_with_parse(&parse, text.as_ref(), entry);
+            let label = build_label(db, project_id, &parse, text.as_ref(), entry);
             let docs = docs_for_entry_with_parse(db, project_id, def_file_id, &parse, entry);
             let contents = format_hover_contents(&label, docs.as_deref());
 
@@ -65,6 +65,30 @@ fn format_hover_contents(label: &str, docs: Option<&str>) -> String {
         Some(doc) if !doc.is_empty() => format!("{code}\n\n{doc}"),
         _ => code,
     }
+}
+
+fn build_label(
+    db: &dyn HirDatabase,
+    project_id: ProjectId,
+    parse: &Parse,
+    text: &str,
+    entry: &DefEntry,
+) -> String {
+    match entry.kind() {
+        DefKind::Function | DefKind::Modifier => {
+            if let Some(signature) = sema_function_signature_for_entry(db, project_id, entry) {
+                return signature.label;
+            }
+        }
+        DefKind::Variable => {
+            if let Some(label) = sema_variable_label_for_entry(db, project_id, entry) {
+                return label;
+            }
+        }
+        _ => {}
+    }
+
+    build_label_with_parse(parse, text, entry)
 }
 
 fn build_label_with_parse(parse: &Parse, text: &str, entry: &DefEntry) -> String {
