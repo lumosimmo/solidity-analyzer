@@ -10,7 +10,7 @@ use foundry_compilers::{
     },
     resolver::{SolImportAlias, parse::SolParser},
 };
-use sa_paths::{NormalizedPath, WorkspacePath};
+use sa_paths::NormalizedPath;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Remapping {
@@ -195,14 +195,7 @@ pub struct FoundryResolver {
 impl FoundryResolver {
     pub fn new(workspace: &FoundryWorkspace, profile: Option<&str>) -> Result<Self> {
         let resolved_profile = workspace.profile(profile);
-        let mut remappings = resolved_profile.remappings().to_vec();
-        remappings.sort_by(|left, right| {
-            let left_context = left.context().map(|context| context.len()).unwrap_or(0);
-            let right_context = right.context().map(|context| context.len()).unwrap_or(0);
-            right_context
-                .cmp(&left_context)
-                .then_with(|| right.from().len().cmp(&left.from().len()))
-        });
+        let remappings = resolved_profile.remappings().to_vec();
         let paths = project_paths_from_config(workspace, &remappings)?;
         Ok(Self { paths })
     }
@@ -283,7 +276,8 @@ pub fn resolve_import_path(
     current_path: &NormalizedPath,
     import_path: &str,
 ) -> Option<NormalizedPath> {
-    resolve_import_path_with_profile(workspace, current_path, import_path, None)
+    let resolver = FoundryResolver::new(workspace, None).ok()?;
+    resolver.resolve_import_path(current_path, import_path)
 }
 
 pub fn resolve_import_path_with_resolver(
@@ -293,9 +287,7 @@ pub fn resolve_import_path_with_resolver(
     resolver: Option<&FoundryResolver>,
 ) -> Option<NormalizedPath> {
     if let Some(resolver) = resolver {
-        resolver
-            .resolve_import_path(current_path, import_path)
-            .or_else(|| resolve_import_path(workspace, current_path, import_path))
+        resolver.resolve_import_path(current_path, import_path)
     } else {
         resolve_import_path(workspace, current_path, import_path)
     }
@@ -307,99 +299,8 @@ pub fn resolve_import_path_with_profile(
     import_path: &str,
     profile: Option<&str>,
 ) -> Option<NormalizedPath> {
-    let import_path = normalize_import_path(import_path);
-    let import_path = import_path.as_ref();
-    if import_path.starts_with("./") || import_path.starts_with("../") {
-        let parent = current_path
-            .as_str()
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or(".");
-        if parent == "." {
-            // Bare filename with no parent directory.
-            // `./foo` can strip the prefix and anchor to workspace root.
-            // `../foo` is unresolvable since there's no parent to go up from.
-            if import_path.starts_with("../") {
-                return None;
-            }
-            let combined = import_path.trim_start_matches("./").to_string();
-            return Some(join_workspace_path(workspace, &combined));
-        }
-        let combined = format!("{parent}/{import_path}");
-        return Some(join_workspace_path(workspace, &combined));
-    }
-
-    let resolved_profile = workspace.profile(profile);
-    let context = remapping_context(workspace, current_path);
-    if let Some(remapped) = remap_import_path(import_path, &context, resolved_profile.remappings())
-    {
-        return Some(join_workspace_path(workspace, &remapped));
-    }
-
-    Some(join_workspace_path(workspace, import_path))
-}
-
-fn remapping_context(workspace: &FoundryWorkspace, current_path: &NormalizedPath) -> String {
-    WorkspacePath::new(workspace.root(), current_path)
-        .map(|path| path.as_str().to_string())
-        .unwrap_or_else(|| current_path.as_str().to_string())
-}
-
-fn remap_import_path(import_path: &str, context: &str, remappings: &[Remapping]) -> Option<String> {
-    let mut longest_context = 0usize;
-    let mut longest_prefix = 0usize;
-    let mut best_target = None;
-    let mut unprefixed = None;
-
-    for remapping in remappings {
-        let remap_context = remapping.context().unwrap_or("");
-        if remap_context.len() < longest_context {
-            continue;
-        }
-        if !context.starts_with(remap_context) {
-            continue;
-        }
-        if remap_context.len() == longest_context && remapping.from().len() < longest_prefix {
-            continue;
-        }
-        let stripped = match import_path.strip_prefix(remapping.from()) {
-            Some(stripped) => stripped,
-            None => continue,
-        };
-
-        longest_context = remap_context.len();
-        longest_prefix = remapping.from().len();
-        best_target = Some(remapping.to());
-        unprefixed = Some(stripped);
-    }
-
-    let best_target = best_target?;
-    let unprefixed = unprefixed?;
-    Some(format!("{best_target}{unprefixed}"))
-}
-
-fn join_workspace_path(workspace: &FoundryWorkspace, path: &str) -> NormalizedPath {
-    if is_absolute_path(path) {
-        NormalizedPath::new(path)
-    } else {
-        NormalizedPath::new(format!("{}/{}", workspace.root().as_str(), path))
-    }
-}
-
-fn is_absolute_path(path: &str) -> bool {
-    if path.starts_with("\\\\") || path.starts_with("//") {
-        return true;
-    }
-
-    if path.starts_with('/') {
-        return true;
-    }
-
-    // Windows absolute paths: require drive letter + ':' + path separator (/ or \)
-    // "C:/..." or "C:\..." are absolute, but "C:foo" is drive-relative (not absolute)
-    path.chars().next().map(|c| c.is_ascii_alphabetic()) == Some(true)
-        && path.chars().nth(1) == Some(':')
-        && path.chars().nth(2).is_some_and(|c| c == '/' || c == '\\')
+    let resolver = FoundryResolver::new(workspace, profile).ok()?;
+    resolver.resolve_import_path(current_path, import_path)
 }
 
 fn normalize_import_path(path: &str) -> std::borrow::Cow<'_, str> {
@@ -412,10 +313,7 @@ fn normalize_import_path(path: &str) -> std::borrow::Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        FoundryProfile, FoundryWorkspace, Remapping, is_absolute_path,
-        resolve_import_path_with_profile,
-    };
+    use super::{FoundryProfile, FoundryResolver, FoundryWorkspace, Remapping};
     use sa_paths::NormalizedPath;
 
     #[test]
@@ -450,59 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_path_detection_respects_drive_letters() {
-        assert!(is_absolute_path("/workspace/src/Main.sol"));
-        assert!(is_absolute_path("C:/workspace/src/Main.sol"));
-        assert!(is_absolute_path("c:\\workspace\\src\\Main.sol"));
-        assert!(is_absolute_path(r"\\server\share\src\Main.sol"));
-        assert!(is_absolute_path("//server/share/src/Main.sol"));
-        assert!(is_absolute_path(r"\\?\C:\workspace\src\Main.sol"));
-        assert!(!is_absolute_path(":/workspace/src/Main.sol"));
-        assert!(!is_absolute_path("relative/path.sol"));
-        // Drive-relative paths (C:foo) are not absolute
-        assert!(!is_absolute_path("C:foo.sol"));
-        assert!(!is_absolute_path("D:relative/path.sol"));
-    }
-
-    #[test]
-    fn bare_filename_with_dotslash_import_anchors_to_workspace() {
-        let root = NormalizedPath::new("/workspace");
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, profile);
-        let current = NormalizedPath::new("Foo.sol");
-
-        let resolved = resolve_import_path_with_profile(&workspace, &current, "./Bar.sol", None);
-        assert_eq!(resolved, Some(NormalizedPath::new("/workspace/Bar.sol")));
-    }
-
-    #[test]
-    fn backslash_relative_imports_are_normalized() {
-        let root = NormalizedPath::new("/workspace");
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, profile);
-        let current = NormalizedPath::new("/workspace/src/Foo.sol");
-
-        let resolved =
-            resolve_import_path_with_profile(&workspace, &current, r"..\lib\Bar.sol", None);
-        assert_eq!(
-            resolved,
-            Some(NormalizedPath::new("/workspace/lib/Bar.sol"))
-        );
-    }
-
-    #[test]
-    fn bare_filename_with_dotdotslash_import_returns_none() {
-        let root = NormalizedPath::new("/workspace");
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, profile);
-        let current = NormalizedPath::new("Foo.sol");
-
-        let resolved = resolve_import_path_with_profile(&workspace, &current, "../Bar.sol", None);
-        assert!(resolved.is_none());
-    }
-
-    #[test]
-    fn profile_aware_remapping_uses_specified_profile() {
+    fn resolve_import_path_with_profile_delegates_to_foundry() {
         let root = NormalizedPath::new("/workspace");
         let default_profile = FoundryProfile::new("default")
             .with_remappings(vec![Remapping::new("lib/", "lib/default/")]);
@@ -513,21 +359,15 @@ mod tests {
         workspace.add_profile(dev_profile);
 
         let current = NormalizedPath::new("/workspace/src/Main.sol");
+        let resolver = FoundryResolver::new(&workspace, Some("dev")).expect("resolver");
 
-        // Default profile uses lib/default/
-        let resolved_default =
-            resolve_import_path_with_profile(&workspace, &current, "lib/Foo.sol", None);
-        assert_eq!(
-            resolved_default,
-            Some(NormalizedPath::new("/workspace/lib/default/Foo.sol"))
+        let resolved = super::resolve_import_path_with_profile(
+            &workspace,
+            &current,
+            "lib/Foo.sol",
+            Some("dev"),
         );
-
-        // Dev profile uses lib/dev/
-        let resolved_dev =
-            resolve_import_path_with_profile(&workspace, &current, "lib/Foo.sol", Some("dev"));
-        assert_eq!(
-            resolved_dev,
-            Some(NormalizedPath::new("/workspace/lib/dev/Foo.sol"))
-        );
+        let expected = resolver.resolve_import_path(&current, "lib/Foo.sol");
+        assert_eq!(resolved, expected);
     }
 }

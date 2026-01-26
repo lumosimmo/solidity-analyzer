@@ -1053,10 +1053,7 @@ impl<'gcx> Resolver<'gcx> {
         counts
     }
 
-    fn linearized_bases(
-        &self,
-        contract_id: hir::ContractId,
-    ) -> Option<&'gcx [hir::ContractId]> {
+    fn linearized_bases(&self, contract_id: hir::ContractId) -> Option<&'gcx [hir::ContractId]> {
         let contract = self.gcx.hir.contract(contract_id);
         if contract.linearization_failed() {
             return None;
@@ -1091,7 +1088,6 @@ impl<'gcx> Resolver<'gcx> {
         };
         bases.contains(&contract_id)
     }
-
 
     fn symbol_for_item(
         &self,

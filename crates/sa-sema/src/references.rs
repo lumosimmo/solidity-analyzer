@@ -1113,17 +1113,13 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         false
     }
 
-    fn linearized_bases(
-        &self,
-        contract_id: hir::ContractId,
-    ) -> Option<&'gcx [hir::ContractId]> {
+    fn linearized_bases(&self, contract_id: hir::ContractId) -> Option<&'gcx [hir::ContractId]> {
         let contract = self.gcx.hir.contract(contract_id);
         if contract.linearization_failed() {
             return None;
         }
         Some(contract.linearized_bases)
     }
-
 
     fn contract_type_members(
         &mut self,

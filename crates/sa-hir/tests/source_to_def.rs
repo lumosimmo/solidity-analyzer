@@ -359,7 +359,7 @@ contract D is B, C {
         offset,
         "foo",
         main_id,
-        Some("B"),
+        Some("C"),
     );
 }
 

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use sa_base_db::{FileId, FileInput, ProjectId, ProjectInput};
 use sa_def::{DefDatabase, DefEntry, DefId, DefKind, DefMap};
@@ -899,6 +900,8 @@ fn collect_imports(
                         resolver.as_ref(),
                     )
                 });
+            let resolved =
+                resolved.or_else(|| resolve_relative_import_fallback(current_path, &path));
             let file_id = resolved
                 .as_ref()
                 .and_then(|resolved| path_to_file_id.get(resolved.as_str()).copied());
@@ -910,6 +913,21 @@ fn collect_imports(
             }
         })
         .collect()
+}
+
+fn resolve_relative_import_fallback(
+    current_path: &NormalizedPath,
+    import_path: &str,
+) -> Option<NormalizedPath> {
+    // Best-effort for VFS-only files where Foundry's resolver requires on-disk paths.
+    let import_path = import_path.replace('\\', "/");
+    if !import_path.starts_with("./") && !import_path.starts_with("../") {
+        return None;
+    }
+    let current = Path::new(current_path.as_str());
+    let base = current.parent().unwrap_or_else(|| Path::new("."));
+    let combined = base.join(import_path);
+    Some(NormalizedPath::new(combined.to_string_lossy()))
 }
 
 pub struct Semantics<'db> {

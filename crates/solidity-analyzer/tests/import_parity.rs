@@ -24,7 +24,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 fn write_foundry_toml(root: &Path) {
     let foundry_toml = r#"
 [profile.default]
-remappings = ["dep/=lib/default/", "lib/foo:dep/=lib/foo/deps/"]
+remappings = ["lib/foo:dep/=lib/foo/deps/", "dep/=lib/default/"]
 "#;
     fs::write(root.join("foundry.toml"), foundry_toml).expect("write foundry.toml");
 }

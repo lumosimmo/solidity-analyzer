@@ -15,7 +15,7 @@ use solar::interface::source_map::{FileLoader, SourceMap};
 use solar::interface::{Session, Span};
 use solar::sema::Compiler;
 use solar::sema::hir::SourceId;
-use tracing::warn;
+use tracing::{debug, warn};
 
 mod completion;
 mod contract_members;
@@ -293,42 +293,56 @@ fn files_with_missing_imports(
         if !parse.errors().is_empty() {
             continue;
         }
-        let mut checked = false;
-        if let Some(resolver) = resolver.as_ref()
-            && let Ok(imports) = resolver.resolved_imports(path, text.as_ref())
-        {
-            checked = true;
-            for import in imports {
-                let resolved = import.resolved_path.or_else(|| {
-                    resolve_import_path_with_resolver(workspace, path, &import.path, Some(resolver))
-                });
-                let Some(resolved) = resolved else {
-                    missing.insert(*file_id);
-                    break;
-                };
-                if !path_to_file_id.contains_key(&resolved) {
-                    missing.insert(*file_id);
-                    break;
+        if let Some(resolver) = resolver.as_ref() {
+            match resolver.resolved_imports(path, text.as_ref()) {
+                Ok(imports) => {
+                    for import in imports {
+                        let resolved = import.resolved_path.or_else(|| {
+                            resolve_import_path_with_resolver(
+                                workspace,
+                                path,
+                                &import.path,
+                                Some(resolver),
+                            )
+                        });
+                        let resolved = resolved
+                            .or_else(|| resolve_relative_import_fallback(path, &import.path));
+                        let Some(resolved) = resolved else {
+                            missing.insert(*file_id);
+                            break;
+                        };
+                        if !path_to_file_id.contains_key(&resolved) {
+                            missing.insert(*file_id);
+                            break;
+                        }
+                    }
                 }
-            }
-        }
-        if checked {
-            continue;
-        }
-        for import in sa_syntax::parse_imports(text.as_ref()) {
-            let Some(resolved) =
-                resolve_import_path_with_resolver(workspace, path, &import, resolver.as_ref())
-            else {
-                missing.insert(*file_id);
-                break;
-            };
-            if !path_to_file_id.contains_key(&resolved) {
-                missing.insert(*file_id);
-                break;
+                Err(error) => {
+                    debug!(
+                        ?error,
+                        path = %path,
+                        "sema: failed to parse imports with foundry parser"
+                    );
+                }
             }
         }
     }
     missing
+}
+
+fn resolve_relative_import_fallback(
+    current_path: &NormalizedPath,
+    import_path: &str,
+) -> Option<NormalizedPath> {
+    // Best-effort for in-memory files where Foundry resolution requires on-disk paths.
+    let import_path = import_path.replace('\\', "/");
+    if !import_path.starts_with("./") && !import_path.starts_with("../") {
+        return None;
+    }
+    let current = Path::new(current_path.as_str());
+    let base = current.parent().unwrap_or_else(|| Path::new("."));
+    let combined = base.join(import_path);
+    Some(NormalizedPath::new(combined.to_string_lossy()))
 }
 
 fn collect_workspace_files(

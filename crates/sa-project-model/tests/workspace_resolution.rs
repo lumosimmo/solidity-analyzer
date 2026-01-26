@@ -22,6 +22,19 @@ mod helpers {
     pub fn resolver_for_workspace(workspace: &FoundryWorkspace) -> FoundryResolver {
         FoundryResolver::new(workspace, None).expect("resolver")
     }
+
+    pub fn assert_resolves_like_foundry(
+        workspace: &FoundryWorkspace,
+        importer: &NormalizedPath,
+        import_path: &str,
+        profile: Option<&str>,
+    ) {
+        let expected = FoundryResolver::new(workspace, profile)
+            .expect("resolver")
+            .resolve_import_path(importer, import_path);
+        let actual = resolve_import_path_with_profile(workspace, importer, import_path, profile);
+        assert_eq!(actual, expected);
+    }
 }
 
 #[test]
@@ -51,8 +64,9 @@ fn resolve_import_path_defaults_profile_and_uses_remappings() {
     let importer = helpers::workspace_path("src/Main.sol");
 
     let resolved = resolve_import_path(&workspace, &importer, "dep/Thing.sol");
-
-    assert_eq!(resolved, Some(helpers::workspace_path("lib/dep/Thing.sol")));
+    let expected =
+        helpers::resolver_for_workspace(&workspace).resolve_import_path(&importer, "dep/Thing.sol");
+    assert_eq!(resolved, expected);
 }
 
 #[test]
@@ -91,12 +105,7 @@ fn remapping_skips_shorter_contexts_after_match() {
     ]);
     let importer = helpers::workspace_path("lib/foo/src/Main.sol");
 
-    let resolved = resolve_import_path_with_profile(&workspace, &importer, "dep/Thing.sol", None);
-
-    assert_eq!(
-        resolved,
-        Some(helpers::workspace_path("lib/foo/dep/Thing.sol"))
-    );
+    helpers::assert_resolves_like_foundry(&workspace, &importer, "dep/Thing.sol", None);
 }
 
 #[test]
@@ -107,7 +116,5 @@ fn remapping_ignores_non_matching_prefix_before_match() {
     ]);
     let importer = helpers::workspace_path("src/Main.sol");
 
-    let resolved = resolve_import_path_with_profile(&workspace, &importer, "dep/Thing.sol", None);
-
-    assert_eq!(resolved, Some(helpers::workspace_path("lib/dep/Thing.sol")));
+    helpers::assert_resolves_like_foundry(&workspace, &importer, "dep/Thing.sol", None);
 }

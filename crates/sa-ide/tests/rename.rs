@@ -174,11 +174,11 @@ contract A {
 }
 
 contract B is A {
-    function /*def*/foo() public virtual override {}
+    function foo() public virtual override {}
 }
 
 contract C is A {
-    function foo() public virtual override {}
+    function /*def*/foo() public virtual override {}
 }
 
 contract D is B, C {

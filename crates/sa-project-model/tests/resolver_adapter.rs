@@ -8,7 +8,7 @@ fn resolver_for_workspace(workspace: &FoundryWorkspace, profile: Option<&str>) -
     FoundryResolver::new(workspace, profile).expect("resolver adapter")
 }
 
-fn assert_adapter_matches_legacy(
+fn assert_adapter_matches_foundry(
     workspace: &FoundryWorkspace,
     importer: &NormalizedPath,
     import_path: &str,
@@ -29,7 +29,7 @@ fn resolver_adapter_matches_context_remapping() {
     let workspace = FoundryWorkspace::new(root, profile);
 
     let importer = NormalizedPath::new("/workspace/lib/foo/src/Main.sol");
-    assert_adapter_matches_legacy(&workspace, &importer, "dep/Thing.sol");
+    assert_adapter_matches_foundry(&workspace, &importer, "dep/Thing.sol");
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn resolver_adapter_matches_longest_prefix_rules() {
     let workspace = FoundryWorkspace::new(root, profile);
 
     let importer = NormalizedPath::new("/workspace/src/Main.sol");
-    assert_adapter_matches_legacy(&workspace, &importer, "lib/special/Thing.sol");
+    assert_adapter_matches_foundry(&workspace, &importer, "lib/special/Thing.sol");
 }
 
 #[test]

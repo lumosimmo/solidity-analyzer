@@ -63,7 +63,13 @@ pub fn index_workspace(
             }
         };
 
-        for resolved in resolved_import_paths(workspace, &resolver, &path, &text) {
+        for resolved in resolved_import_paths(
+            workspace,
+            &resolver,
+            &path,
+            &text,
+            ImportParseFallback::Disabled,
+        ) {
             let resolved_str = resolved.as_str().to_string();
             let exists = *file_exists_cache
                 .entry(resolved_str.clone())
@@ -116,7 +122,13 @@ pub fn index_open_file_imports(
             },
         };
 
-        for resolved in resolved_import_paths(workspace, &resolver, &path, &text) {
+        for resolved in resolved_import_paths(
+            workspace,
+            &resolver,
+            &path,
+            &text,
+            ImportParseFallback::OpenBuffer,
+        ) {
             let resolved = lsp_utils::normalize_path(Path::new(resolved.as_str()));
             if !PathBuf::from(resolved.as_str()).is_file() {
                 continue;
@@ -135,11 +147,24 @@ pub fn index_open_file_imports(
     Ok(result)
 }
 
+#[derive(Clone, Copy)]
+enum ImportParseFallback {
+    Disabled,
+    OpenBuffer,
+}
+
+impl ImportParseFallback {
+    fn allow_solar_fallback(self) -> bool {
+        matches!(self, ImportParseFallback::OpenBuffer)
+    }
+}
+
 fn resolved_import_paths(
     workspace: &FoundryWorkspace,
     resolver: &FoundryResolver,
     current_path: &NormalizedPath,
     text: &str,
+    fallback: ImportParseFallback,
 ) -> Vec<NormalizedPath> {
     match resolver.resolved_imports(current_path, text) {
         Ok(imports) => resolved_imports_with_resolver(workspace, resolver, current_path, imports),
@@ -149,17 +174,21 @@ fn resolved_import_paths(
                 path = %current_path,
                 "indexer: failed to parse imports with foundry parser"
             );
-            sa_syntax::parse_imports(text)
-                .into_iter()
-                .filter_map(|path| {
-                    resolve_import_path_with_resolver(
-                        workspace,
-                        current_path,
-                        &path,
-                        Some(resolver),
-                    )
-                })
-                .collect()
+            if fallback.allow_solar_fallback() {
+                sa_syntax::parse_imports(text)
+                    .into_iter()
+                    .filter_map(|path| {
+                        resolve_import_path_with_resolver(
+                            workspace,
+                            current_path,
+                            &path,
+                            Some(resolver),
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
         }
     }
 }
@@ -389,8 +418,8 @@ contract Thing {}
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
         let profile = FoundryProfile::new("default").with_remappings(vec![
-            Remapping::new("dep/", "lib/default/dep/"),
             Remapping::new("dep/", "lib/foo/dep/").with_context("lib/foo"),
+            Remapping::new("dep/", "lib/default/dep/"),
         ]);
         let workspace = FoundryWorkspace::new(root_path, profile);
         let open_path = NormalizedPath::new(root.join("lib/foo/src/Main.sol").to_string_lossy());
