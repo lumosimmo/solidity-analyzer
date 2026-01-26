@@ -37,10 +37,6 @@ jobs:
             target: aarch64-apple-darwin
             vscode_target: darwin-arm64
             bin_ext: ""
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            vscode_target: win32-x64
-            bin_ext: .exe
     runs-on: ${{ matrix.os }}
     env:
       BIN_PATH: target/${{ matrix.target }}/release/solidity-analyzer${{ matrix.bin_ext }}
