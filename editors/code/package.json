@@ -4,7 +4,7 @@
     "description": "Solidity language support for Visual Studio Code",
     "private": true,
     "icon": "icon.png",
-    "version": "0.1.0-rc2",
+    "version": "0.1.0-rc3",
     "publisher": "lumosimmo",
     "type": "commonjs",
     "repository": {
