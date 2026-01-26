@@ -310,6 +310,12 @@ impl<'gcx> Resolver<'gcx> {
                     {
                         self.consider(range, resolution);
                     }
+                } else if let Some(range) = self.span_to_text_range(base.span)
+                    && range_contains(range, self.offset)
+                    && self.is_super_expr(base)
+                {
+                    let resolution = self.resolve_super_member(ident, None, range);
+                    self.consider(range, resolution);
                 } else {
                     self.visit_expr(base);
                 }
@@ -433,6 +439,14 @@ impl<'gcx> Resolver<'gcx> {
                 }
             }
             hir::ExprKind::Member(base, ident) => {
+                if let Some(range) = self.span_to_text_range(base.span)
+                    && range_contains(range, self.offset)
+                    && self.is_super_expr(base)
+                {
+                    let resolution = self.resolve_super_member(ident, Some(args), range);
+                    self.consider(range, resolution);
+                    return true;
+                }
                 if let Some(range) = self.span_to_text_range(ident.span)
                     && range_contains(range, self.offset)
                     && self.is_super_expr(base)

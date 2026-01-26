@@ -295,6 +295,87 @@ contract Derived is Base {
 }
 
 #[test]
+fn resolve_super_receiver_resolves_base_method() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract Base {
+    function /*base*/ping() public virtual {}
+}
+
+contract Derived is Base {
+    function ping() public override {}
+
+    function test() public {
+        /*super*/super.ping();
+    }
+}
+"#,
+        &["/*base*/", "/*super*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "ping".len());
+    let super_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, super_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("Base"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
+fn resolve_super_receiver_resolves_base_member_access() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract Base {
+    function /*base*/ping() internal virtual {}
+}
+
+contract Derived is Base {
+    function ping() internal override {}
+
+    function test() internal {
+        function() internal f = /*super*/super.ping;
+        f();
+    }
+}
+"#,
+        &["/*base*/", "/*super*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "ping".len());
+    let super_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, super_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("Base"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
 fn resolve_super_call_skips_base_with_mismatched_overload() {
     let (main_text, offsets) = extract_offsets(
         r#"
@@ -326,6 +407,48 @@ contract Derived is BaseB, BaseA {
     let (snapshot, _) = snapshot_for_fixture(&fixture);
     let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
     let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("BaseA"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
+fn resolve_super_receiver_skips_base_with_mismatched_overload() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract BaseA {
+    function /*base*/ping() public virtual {}
+}
+
+contract BaseB {
+    function ping(uint256 value) public virtual {}
+}
+
+contract Derived is BaseB, BaseA {
+    function ping() public override {
+        /*super*/super.ping();
+    }
+}
+"#,
+        &["/*base*/", "/*super*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "ping".len());
+    let super_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, super_offset);
 
     let ResolveOutcome::Resolved(symbol) = outcome else {
         panic!("expected resolved outcome");
@@ -380,6 +503,60 @@ abstract contract ERC1155 is ERC165, IERC1155, IERC1155MetadataURI, IERC1155Erro
     let (snapshot, _) = snapshot_for_fixture(&fixture);
     let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
     let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("ERC165"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
+fn resolve_super_receiver_with_interfaces() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+interface IERC165 {
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
+}
+
+abstract contract ERC165 is IERC165 {
+    function /*base*/supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC165).interfaceId;
+    }
+}
+
+interface IERC1155 is IERC165 {}
+interface IERC1155MetadataURI is IERC1155 {}
+interface IERC1155Errors {}
+
+abstract contract ERC1155 is ERC165, IERC1155, IERC1155MetadataURI, IERC1155Errors {
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(ERC165, IERC165)
+        returns (bool)
+    {
+        return /*super*/super.supportsInterface(interfaceId);
+    }
+}
+"#,
+        &["/*base*/", "/*super*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "supportsInterface".len());
+    let super_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, super_offset);
 
     let ResolveOutcome::Resolved(symbol) = outcome else {
         panic!("expected resolved outcome");

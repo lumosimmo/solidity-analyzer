@@ -538,6 +538,53 @@ contract D is B, C {
 }
 
 #[tokio::test]
+async fn goto_definition_resolves_super_receiver_and_member() {
+    let temp = tempdir().expect("tempdir");
+    let root = temp.path().canonicalize().expect("canonicalize root");
+    create_foundry_workspace(&root);
+
+    let (text, offsets) = extract_offsets(
+        r#"
+contract Base {
+    function /*def*/supportsInterface(bytes4 interfaceId) public view virtual returns (bool) {
+        return true;
+    }
+}
+
+contract Derived is Base {
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return /*super*/super./*method*/supportsInterface(interfaceId);
+    }
+}
+"#,
+        &["/*def*/", "/*super*/", "/*method*/"],
+    );
+    let def_offset = offsets[0];
+    let super_offset = offsets[1];
+    let method_offset = offsets[2];
+    fs::write(root.join("src/Main.sol"), &text).expect("write main");
+
+    let (mut service, _root_uri) =
+        setup_lsp_service(&root, make_server(solidity_analyzer::Server::new)).await;
+
+    let main_uri = Url::from_file_path(root.join("src/Main.sol")).expect("main uri");
+    open_document(&mut service, main_uri.clone(), text.clone()).await;
+
+    let expected_range = TextRange::at(def_offset, TextSize::from(17));
+    let expected_range = to_lsp_range(expected_range, &text);
+
+    let super_location =
+        request_goto_definition(&mut service, main_uri.clone(), &text, super_offset, 8).await;
+    assert_eq!(super_location.uri, main_uri);
+    assert_eq!(super_location.range, expected_range);
+
+    let method_location =
+        request_goto_definition(&mut service, main_uri.clone(), &text, method_offset, 9).await;
+    assert_eq!(method_location.uri, main_uri);
+    assert_eq!(method_location.range, expected_range);
+}
+
+#[tokio::test]
 async fn goto_definition_resolves_for_opened_lib_files() {
     let temp = tempdir().expect("tempdir");
     let root = temp.path().canonicalize().expect("canonicalize root");

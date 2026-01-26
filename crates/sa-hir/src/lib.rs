@@ -1063,20 +1063,15 @@ fn def_id_from_symbol(program: &HirProgram, symbol: &ResolvedSymbol) -> Option<D
         ResolvedSymbolKind::Variable => DefKind::Variable,
         ResolvedSymbolKind::Udvt => DefKind::Udvt,
     };
-    let mut fallback = None;
     for entry in program
         .def_map()
         .entries_by_name_in_file(symbol.definition_file_id, &symbol.name)
         .into_iter()
         .filter(|entry| entry.kind() == kind && entry.container() == symbol.container.as_deref())
     {
-        if fallback.is_none() {
-            fallback = Some(entry.id());
-        }
         if entry.location().range() == symbol.definition_range {
             return Some(entry.id());
         }
     }
-
-    fallback
+    None
 }
