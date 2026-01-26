@@ -97,7 +97,6 @@ struct ReferenceCollector<'gcx, 'a> {
     source_id: hir::SourceId,
     source_text: Arc<String>,
     current_contract: Option<hir::ContractId>,
-    c3_cache: HashMap<hir::ContractId, Vec<hir::ContractId>>,
     import_name_counts: Option<HashMap<String, usize>>,
     current_file_id: FileId,
     references: &'a mut HashMap<DefinitionKey, Vec<SemaReference>>,
@@ -120,7 +119,6 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
             source_id,
             source_text,
             current_contract: None,
-            c3_cache: HashMap::new(),
             import_name_counts: None,
             current_file_id,
             references,
@@ -910,7 +908,7 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         args: Option<&hir::CallArgs<'gcx>>,
     ) -> Option<hir::ItemId> {
         let contract_id = self.current_contract?;
-        let bases = self.c3_linearized_bases(contract_id)?;
+        let bases = self.linearized_bases(contract_id)?;
         let start = bases.iter().position(|&id| id == contract_id)?;
         for &base_id in bases.iter().skip(start + 1) {
             let candidates = self.contract_items_named(base_id, ident.name);
@@ -918,7 +916,10 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
                 continue;
             }
             if let Some(args) = args {
-                return self.resolve_call_overloads(&candidates, args);
+                if let Some(item_id) = self.resolve_call_overloads(&candidates, args) {
+                    return Some(item_id);
+                }
+                continue;
             }
             return candidates.first().copied();
         }
@@ -954,7 +955,10 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
             return None;
         }
         if items.len() == 1 {
-            return Some(items[0]);
+            let item_id = items[0];
+            let ty = self.gcx.type_of_item(item_id);
+            let params = ty.parameters()?;
+            return (params.len() == args.len()).then_some(item_id);
         }
 
         let arg_count = args.len();
@@ -1022,7 +1026,7 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
 
     fn select_by_c3_order(&mut self, items: &[hir::ItemId]) -> Option<hir::ItemId> {
         let contract_id = self.current_contract?;
-        let bases = self.c3_linearized_bases(contract_id)?;
+        let bases = self.linearized_bases(contract_id)?;
         let mut best = None;
         let mut best_idx = usize::MAX;
 
@@ -1109,95 +1113,17 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         false
     }
 
-    fn c3_linearized_bases(
-        &mut self,
+    fn linearized_bases(
+        &self,
         contract_id: hir::ContractId,
-    ) -> Option<Vec<hir::ContractId>> {
-        if !self.c3_cache.contains_key(&contract_id) {
-            let mut stack = Vec::new();
-            self.c3_linearize(contract_id, &mut stack)?;
-        }
-        self.c3_cache.get(&contract_id).cloned()
-    }
-
-    fn c3_linearize(
-        &mut self,
-        contract_id: hir::ContractId,
-        stack: &mut Vec<hir::ContractId>,
-    ) -> Option<Vec<hir::ContractId>> {
-        if let Some(cached) = self.c3_cache.get(&contract_id) {
-            return Some(cached.clone());
-        }
-        if stack.contains(&contract_id) {
+    ) -> Option<&'gcx [hir::ContractId]> {
+        let contract = self.gcx.hir.contract(contract_id);
+        if contract.linearization_failed() {
             return None;
         }
-
-        stack.push(contract_id);
-        let result = match self.c3_linearize_inner(contract_id, stack) {
-            Some(result) => result,
-            None => {
-                stack.pop();
-                return None;
-            }
-        };
-        stack.pop();
-
-        self.c3_cache.insert(contract_id, result.clone());
-        Some(result)
+        Some(contract.linearized_bases)
     }
 
-    fn c3_linearize_inner(
-        &mut self,
-        contract_id: hir::ContractId,
-        stack: &mut Vec<hir::ContractId>,
-    ) -> Option<Vec<hir::ContractId>> {
-        let contract = self.gcx.hir.contract(contract_id);
-        if contract.bases.is_empty() {
-            return Some(vec![contract_id]);
-        }
-
-        let mut seqs = Vec::with_capacity(contract.bases.len() + 1);
-        for &base_id in contract.bases {
-            let base_lin = match self.c3_cache.get(&base_id) {
-                Some(cached) => cached.clone(),
-                None => {
-                    let computed = self.c3_linearize(base_id, stack)?;
-                    self.c3_cache.insert(base_id, computed.clone());
-                    computed
-                }
-            };
-            seqs.push(base_lin);
-        }
-        seqs.push(contract.bases.to_vec());
-
-        let mut result = Vec::with_capacity(1 + seqs.iter().map(|seq| seq.len()).sum::<usize>());
-        result.push(contract_id);
-
-        while !seqs.is_empty() {
-            let mut next = None;
-            for seq in &seqs {
-                let head = *seq.first()?;
-                let in_tail = seqs
-                    .iter()
-                    .any(|other| other.iter().skip(1).any(|candidate| *candidate == head));
-                if !in_tail {
-                    next = Some(head);
-                    break;
-                }
-            }
-
-            let head = next?;
-            result.push(head);
-            for seq in &mut seqs {
-                if seq.first() == Some(&head) {
-                    seq.remove(0);
-                }
-            }
-            seqs.retain(|seq| !seq.is_empty());
-        }
-
-        Some(result)
-    }
 
     fn contract_type_members(
         &mut self,
@@ -1221,7 +1147,7 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         if current_contract == contract_id {
             return true;
         }
-        let Some(bases) = self.c3_linearized_bases(current_contract) else {
+        let Some(bases) = self.linearized_bases(current_contract) else {
             return false;
         };
         bases.contains(&contract_id)

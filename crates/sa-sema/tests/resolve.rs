@@ -295,6 +295,156 @@ contract Derived is Base {
 }
 
 #[test]
+fn resolve_super_call_skips_base_with_mismatched_overload() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract BaseA {
+    function /*base*/ping() public virtual {}
+}
+
+contract BaseB {
+    function ping(uint256 value) public virtual {}
+}
+
+contract Derived is BaseB, BaseA {
+    function ping() public override {
+        super.p/*call*/ing();
+    }
+}
+"#,
+        &["/*base*/", "/*call*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "ping".len());
+    let call_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("BaseA"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
+fn resolve_super_call_with_interfaces() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+interface IERC165 {
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
+}
+
+abstract contract ERC165 is IERC165 {
+    function /*base*/supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return interfaceId == type(IERC165).interfaceId;
+    }
+}
+
+interface IERC1155 is IERC165 {}
+interface IERC1155MetadataURI is IERC1155 {}
+interface IERC1155Errors {}
+
+abstract contract ERC1155 is ERC165, IERC1155, IERC1155MetadataURI, IERC1155Errors {
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(ERC165, IERC165)
+        returns (bool)
+    {
+        return super.su/*call*/pportsInterface(interfaceId);
+    }
+}
+"#,
+        &["/*base*/", "/*call*/"],
+    );
+    let base_range = range_from_offset(offsets[0], "supportsInterface".len());
+    let call_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Function);
+    assert_eq!(symbol.container.as_deref(), Some("ERC165"));
+    assert_eq!(symbol.definition_range, base_range);
+}
+
+#[test]
+fn resolve_super_call_unresolved_when_linearization_failed() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract O {}
+
+contract A is O {
+    function ping() public virtual {}
+}
+
+contract B is O {
+    function ping() public virtual {}
+}
+
+contract C is A, B {}
+
+contract D is B, A {}
+
+contract E is C, D {
+    function ping() public override(A, B) {
+        super.p/*call*/ing();
+    }
+}
+"#,
+        &["/*call*/"],
+    );
+    let call_offset = offsets[0];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let linearization_failed = snapshot.with_gcx(|gcx| {
+        let contract_id = gcx
+            .hir
+            .contract_ids()
+            .find(|id| gcx.hir.contract(*id).name.as_str() == "E")
+            .expect("contract E");
+        gcx.hir.contract(contract_id).linearization_failed()
+    });
+    assert!(linearization_failed, "expected linearization to fail");
+
+    let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+    assert!(
+        matches!(outcome, ResolveOutcome::Unresolved { .. }),
+        "expected unresolved outcome"
+    );
+}
+
+#[test]
 fn resolve_returns_unavailable_when_offset_has_no_symbol() {
     let (main_text, offset) = extract_offset(
         r#"
