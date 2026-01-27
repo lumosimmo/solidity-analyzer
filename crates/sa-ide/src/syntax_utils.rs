@@ -590,7 +590,7 @@ fn resolve_natspec_for_item_inner(
         };
     };
 
-    let Some(signature) = item_inheritdoc_signature(ctx.parse, ctx.text, item) else {
+    let Some(signature) = item_inheritdoc_signature(ctx, item) else {
         log_inheritdoc_failure(ctx, None, &inheritdoc_contract, "signature_unavailable");
         return ResolvedNatSpec {
             sections,
@@ -655,6 +655,14 @@ fn resolve_inheritdoc_base(
     )?;
     let base_text = ctx.db.file_input(base.file_id).text(ctx.db);
     let base_parse = sa_syntax::parse_file(base_text.as_ref());
+    let base_ctx = InheritdocContext {
+        db: ctx.db,
+        project_id: ctx.project_id,
+        file_id: base.file_id,
+        contract_name: &base.name,
+        parse: &base_parse,
+        text: base_text.as_ref(),
+    };
     let base_contract = match find_contract_in_parse(&base_parse, &base.name) {
         Some(contract) => contract,
         None => {
@@ -672,12 +680,7 @@ fn resolve_inheritdoc_base(
     let base_item = if is_contract {
         base_contract
     } else {
-        match find_contract_member_by_signature(
-            &base_parse,
-            base_text.as_ref(),
-            &base.name,
-            signature,
-        ) {
+        match find_contract_member_by_signature(&base_ctx, signature) {
             Some(item) => item,
             None => {
                 debug!(
@@ -691,14 +694,6 @@ fn resolve_inheritdoc_base(
                 return None;
             }
         }
-    };
-    let base_ctx = InheritdocContext {
-        db: ctx.db,
-        project_id: ctx.project_id,
-        file_id: base.file_id,
-        contract_name: &base.name,
-        parse: &base_parse,
-        text: base_text.as_ref(),
     };
 
     Some(resolve_natspec_for_item(&base_ctx, base_item, visited))
@@ -819,28 +814,50 @@ fn find_contract_in_parse<'a>(parse: &'a Parse, contract_name: &str) -> Option<&
 }
 
 fn find_contract_member_by_signature<'a>(
-    parse: &'a Parse,
-    text: &str,
-    contract_name: &str,
+    ctx: &'a InheritdocContext<'a>,
     signature: &str,
 ) -> Option<&'a Item<'static>> {
-    let contract = find_contract_in_parse(parse, contract_name)?;
+    let contract = find_contract_in_parse(ctx.parse, ctx.contract_name)?;
     let ItemKind::Contract(contract) = &contract.kind else {
         return None;
     };
     contract.body.iter().find(|item| {
-        item_inheritdoc_signature(parse, text, item).is_some_and(|candidate| candidate == signature)
+        item_inheritdoc_signature(ctx, item).is_some_and(|candidate| candidate == signature)
     })
 }
 
-fn item_inheritdoc_signature(parse: &Parse, text: &str, item: &Item<'static>) -> Option<String> {
+fn item_inheritdoc_signature(ctx: &InheritdocContext<'_>, item: &Item<'static>) -> Option<String> {
     match &item.kind {
-        ItemKind::Function(function) => {
-            Some(function_signature_for_inheritdoc(parse, text, function))
-        }
-        ItemKind::Contract(contract) => parse.with_session(|| Some(contract.name.to_string())),
-        _ => parse.with_session(|| item.name().map(|ident| ident.to_string())),
+        ItemKind::Function(function) => sema_inheritdoc_signature(ctx, function).or_else(|| {
+            Some(function_signature_for_inheritdoc(
+                ctx.parse, ctx.text, function,
+            ))
+        }),
+        ItemKind::Contract(contract) => ctx.parse.with_session(|| Some(contract.name.to_string())),
+        _ => ctx
+            .parse
+            .with_session(|| item.name().map(|ident| ident.to_string())),
     }
+}
+
+fn sema_inheritdoc_signature(
+    ctx: &InheritdocContext<'_>,
+    function: &ItemFunction<'_>,
+) -> Option<String> {
+    let (name, span) = ctx.parse.with_session(|| {
+        let ident = function.header.name?;
+        Some((ident.to_string(), ident.span))
+    })?;
+    let name_range = ctx.parse.span_to_text_range(span)?;
+    let project = ctx.db.project_input(ctx.project_id);
+    let snapshot = sema_snapshot_for_project(ctx.db, project);
+    let snapshot = snapshot.for_file(ctx.file_id)?;
+    snapshot.function_abi_signature_for_definition(
+        ctx.file_id,
+        name_range,
+        &name,
+        Some(ctx.contract_name),
+    )
 }
 
 fn function_signature_for_inheritdoc(

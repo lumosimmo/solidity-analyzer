@@ -160,6 +160,22 @@ impl SemaSnapshot {
         })
     }
 
+    pub fn function_abi_signature_for_definition(
+        &self,
+        file_id: FileId,
+        name_range: TextRange,
+        name: &str,
+        container: Option<&str>,
+    ) -> Option<String> {
+        self.with_gcx(|gcx| {
+            let item_id = self.item_id_for_name_range(gcx, file_id, name_range, name, container)?;
+            let hir::ItemId::Function(_) = item_id else {
+                return None;
+            };
+            Some(gcx.item_signature(item_id).to_string())
+        })
+    }
+
     pub fn references_for_definition(
         &self,
         definition_file_id: FileId,
