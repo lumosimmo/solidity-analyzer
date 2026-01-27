@@ -313,3 +313,159 @@ contract Main {
     let labels = completion_labels(&items);
     assert!(labels.contains(&"ping"));
 }
+
+#[test]
+fn member_completions_respect_visibility_and_constants_on_contract_types() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+pragma solidity ^0.8.20;
+
+contract Base {
+    uint256 public pubValue;
+    uint256 internal internalValue;
+    uint256 public constant CONST = 1;
+
+    function pubFn() public {}
+    function extFn() external {}
+    function internalFn() internal {}
+    function privFn() private {}
+}
+
+contract Child is Base {
+    function test() public {
+        Base base;
+        /*inst_start*/base/*inst_end*/./*inst_caret*/pubFn();
+        /*type_start*/Base/*type_end*/./*type_caret*/pubFn();
+    }
+}
+"#,
+        &[
+            "/*inst_start*/",
+            "/*inst_end*/",
+            "/*inst_caret*/",
+            "/*type_start*/",
+            "/*type_end*/",
+            "/*type_caret*/",
+        ],
+    );
+
+    let inst_range = TextRange::new(offsets[0], offsets[1]);
+    let inst_offset = offsets[2];
+    let type_range = TextRange::new(offsets[3], offsets[4]);
+    let type_offset = offsets[5];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let inst_items = snapshot
+        .member_completions(file_id, inst_offset, inst_range, "base")
+        .expect("instance completions");
+    let inst_labels = completion_labels(&inst_items);
+    assert!(inst_labels.contains(&"pubFn"));
+    assert!(inst_labels.contains(&"extFn"));
+    assert!(inst_labels.contains(&"pubValue"));
+    assert!(!inst_labels.contains(&"internalFn"));
+    assert!(!inst_labels.contains(&"privFn"));
+    assert!(!inst_labels.contains(&"internalValue"));
+
+    let type_items = snapshot
+        .member_completions(file_id, type_offset, type_range, "Base")
+        .expect("type completions");
+    let type_labels = completion_labels(&type_items);
+    assert!(type_labels.contains(&"pubFn"));
+    assert!(type_labels.contains(&"extFn"));
+    assert!(type_labels.contains(&"internalFn"));
+    assert!(type_labels.contains(&"CONST"));
+    assert!(!type_labels.contains(&"privFn"));
+    assert!(!type_labels.contains(&"internalValue"));
+}
+
+#[test]
+fn member_completions_include_interface_members() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+pragma solidity ^0.8.20;
+
+interface IFoo {
+    function ping() external;
+    function pong() external;
+}
+
+contract Main {
+    IFoo foo;
+
+    function test() public {
+        /*recv_start*/foo/*recv_end*/./*caret*/ping();
+    }
+}
+"#,
+        &["/*recv_start*/", "/*recv_end*/", "/*caret*/"],
+    );
+
+    let recv_range = TextRange::new(offsets[0], offsets[1]);
+    let caret_offset = offsets[2];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let items = snapshot
+        .member_completions(file_id, caret_offset, recv_range, "foo")
+        .expect("interface completions");
+    let labels = completion_labels(&items);
+    assert!(labels.contains(&"ping"));
+    assert!(labels.contains(&"pong"));
+}
+
+#[test]
+fn member_completions_include_library_functions() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+pragma solidity ^0.8.20;
+
+library Lib {
+    function pubFn() public {}
+    function internalFn() internal {}
+    function privFn() private {}
+}
+
+contract Main {
+    function test() public {
+        /*lib_start*/Lib/*lib_end*/./*lib_caret*/pubFn();
+    }
+}
+"#,
+        &["/*lib_start*/", "/*lib_end*/", "/*lib_caret*/"],
+    );
+
+    let lib_range = TextRange::new(offsets[0], offsets[1]);
+    let lib_offset = offsets[2];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let items = snapshot
+        .member_completions(file_id, lib_offset, lib_range, "Lib")
+        .expect("library completions");
+    let labels = completion_labels(&items);
+    assert!(labels.contains(&"pubFn"));
+    assert!(labels.contains(&"internalFn"));
+    assert!(!labels.contains(&"privFn"));
+}

@@ -4,6 +4,7 @@ use sa_base_db::FileId;
 use sa_span::{TextRange, TextSize, range_contains};
 use solar::ast::{FunctionKind, ImportItems, ItemKind};
 use solar::interface::Ident;
+use solar::sema::builtins::Member;
 use solar::sema::hir;
 use solar::sema::ty::TyKind;
 use solar::sema::{Gcx, Ty};
@@ -91,7 +92,8 @@ impl SemaSnapshot {
             if receiver == "this" {
                 return current_contract
                     .map(|contract_id| {
-                        contract_member_items(gcx, contract_id, ContractMembers::Instance)
+                        let ty = gcx.type_of_item(contract_id.into());
+                        member_items_for_type(gcx, ty, source_id, current_contract)
                     })
                     .unwrap_or_default();
             }
@@ -102,7 +104,8 @@ impl SemaSnapshot {
                         let Some(contract_id) = contract_id_for_symbol(self, gcx, resolved) else {
                             return Vec::new();
                         };
-                        contract_member_items(gcx, contract_id, ContractMembers::Instance)
+                        let ty = gcx.type_of_item(contract_id.into()).make_type_type(gcx);
+                        member_items_for_type(gcx, ty, source_id, current_contract)
                     }
                     ResolvedSymbolKind::Variable => {
                         let Some(var_id) = variable_id_for_symbol(self, gcx, resolved) else {
@@ -133,7 +136,8 @@ impl SemaSnapshot {
                     member_items_for_type(gcx, ty, source_id, current_contract)
                 }
                 Some(ReceiverResolution::Contract(contract_id)) => {
-                    contract_member_items(gcx, contract_id, ContractMembers::Instance)
+                    let ty = gcx.type_of_item(contract_id.into()).make_type_type(gcx);
+                    member_items_for_type(gcx, ty, source_id, current_contract)
                 }
                 None => Vec::new(),
             }
@@ -141,11 +145,6 @@ impl SemaSnapshot {
 
         Some(items)
     }
-}
-
-#[derive(Clone, Copy)]
-enum ContractMembers {
-    Instance,
 }
 
 fn completion_item_for_item(gcx: Gcx<'_>, item_id: hir::ItemId) -> Option<SemaCompletionItem> {
@@ -613,53 +612,6 @@ fn var_declared_before_offset(
     range.start() <= offset
 }
 
-fn contract_member_items(
-    gcx: Gcx<'_>,
-    contract_id: hir::ContractId,
-    members: ContractMembers,
-) -> Vec<SemaCompletionItem> {
-    match members {
-        ContractMembers::Instance => contract_instance_items(gcx, contract_id),
-    }
-}
-
-fn contract_instance_items(gcx: Gcx<'_>, contract_id: hir::ContractId) -> Vec<SemaCompletionItem> {
-    let mut items = Vec::new();
-    for item_id in gcx.hir.contract_item_ids(contract_id) {
-        let item = gcx.hir.item(item_id);
-        if !item.is_public() {
-            continue;
-        }
-        match item_id {
-            hir::ItemId::Function(id) => {
-                let func = gcx.hir.function(id);
-                if func.kind == FunctionKind::Modifier {
-                    continue;
-                }
-                if func.name.is_none() {
-                    continue;
-                }
-                items.push(SemaCompletionItem {
-                    label: gcx.item_name(id).to_string(),
-                    kind: SemaCompletionKind::Function,
-                });
-            }
-            hir::ItemId::Variable(id) => {
-                let var = gcx.hir.variable(id);
-                let Some(name) = var.name else {
-                    continue;
-                };
-                items.push(SemaCompletionItem {
-                    label: name.to_string(),
-                    kind: SemaCompletionKind::Variable,
-                });
-            }
-            _ => {}
-        }
-    }
-    items
-}
-
 fn super_member_items(gcx: Gcx<'_>, contract_id: hir::ContractId) -> Vec<SemaCompletionItem> {
     let mut items = Vec::new();
     let contract = gcx.hir.contract(contract_id);
@@ -705,23 +657,42 @@ fn member_items_for_type<'gcx>(
         return contract_type_items(gcx, target_contract_id, base_accessible);
     }
 
-    if let Some(contract_id) = contract_id_from_ty(ty) {
-        return contract_member_items(gcx, contract_id, ContractMembers::Instance);
-    }
+    completion_items_from_members(gcx, gcx.members_of(ty, source_id, contract_id))
+}
 
-    gcx.members_of(ty, source_id, contract_id)
-        .iter()
-        .map(|member| {
-            let kind = match member.ty.kind {
+fn completion_items_from_members<'gcx>(
+    gcx: Gcx<'gcx>,
+    members: &[Member<'gcx>],
+) -> Vec<SemaCompletionItem> {
+    let mut items = Vec::with_capacity(members.len());
+    for member in members {
+        let mut label = member.name.to_string();
+        let kind = match member.res {
+            Some(hir::Res::Item(hir::ItemId::Function(function_id))) => {
+                let func = gcx.hir.function(function_id);
+                if let Some(var_id) = func.gettee {
+                    if let Some(name) = gcx.hir.variable(var_id).name {
+                        label = name.to_string();
+                    }
+                    SemaCompletionKind::Variable
+                } else {
+                    SemaCompletionKind::Function
+                }
+            }
+            Some(hir::Res::Item(hir::ItemId::Variable(var_id))) => {
+                if let Some(name) = gcx.hir.variable(var_id).name {
+                    label = name.to_string();
+                }
+                SemaCompletionKind::Variable
+            }
+            _ => match member.ty.kind {
                 TyKind::FnPtr(_) => SemaCompletionKind::Function,
                 _ => SemaCompletionKind::Variable,
-            };
-            SemaCompletionItem {
-                label: member.name.to_string(),
-                kind,
-            }
-        })
-        .collect()
+            },
+        };
+        items.push(SemaCompletionItem { label, kind });
+    }
+    items
 }
 
 fn contract_type_items(
@@ -769,17 +740,6 @@ fn var_kind_declares_in_scope(kind: hir::VarKind) -> bool {
         kind,
         hir::VarKind::Error | hir::VarKind::Event | hir::VarKind::Struct
     )
-}
-
-fn contract_id_from_ty(ty: Ty<'_>) -> Option<hir::ContractId> {
-    match ty.kind {
-        TyKind::Contract(id) => Some(id),
-        TyKind::Ref(inner, _) => match inner.kind {
-            TyKind::Contract(id) => Some(id),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 fn contract_id_for_symbol(
