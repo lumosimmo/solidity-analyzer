@@ -11,7 +11,7 @@ use foundry_compilers::{
 };
 use sa_paths::NormalizedPath;
 use sa_project_model::{
-    FoundryResolver, FoundryWorkspace, ResolvedImport, project_paths_from_config,
+    FoundryResolver, FoundryWorkspace, Remapping, ResolvedImport, project_paths_from_config,
     resolve_import_path_with_resolver,
 };
 use tracing::{debug, warn};
@@ -41,11 +41,10 @@ impl IndexResult {
 
 pub fn index_workspace(
     workspace: &FoundryWorkspace,
-    profile: Option<&str>,
+    remappings: &[Remapping],
 ) -> anyhow::Result<IndexResult> {
     let mut result = IndexResult::default();
-    let resolved_profile = workspace.profile(profile);
-    let paths = project_paths_from_config(workspace, resolved_profile.remappings())
+    let paths = project_paths_from_config(workspace, remappings)
         .with_context(|| "indexer: failed to build project paths")?;
     let sol_paths = paths.with_language::<SolcLanguage>();
     let sources = read_input_files_lenient(&sol_paths);
@@ -67,11 +66,11 @@ pub fn index_workspace(
 
 pub fn index_open_file_imports(
     workspace: &FoundryWorkspace,
-    profile: Option<&str>,
+    remappings: &[Remapping],
     open_path: &NormalizedPath,
     open_text: &str,
 ) -> anyhow::Result<IndexResult> {
-    let resolver = FoundryResolver::new(workspace, profile)?;
+    let resolver = FoundryResolver::new(workspace, remappings)?;
     let mut result = IndexResult::default();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
@@ -95,7 +94,8 @@ pub fn index_open_file_imports(
             },
         };
 
-        for resolved in resolved_import_paths(workspace, &resolver, &path, &text, true) {
+        for resolved in resolved_import_paths(workspace, remappings, &resolver, &path, &text, true)
+        {
             let resolved = lsp_utils::normalize_path(Path::new(resolved.as_str()));
             if !PathBuf::from(resolved.as_str()).is_file() {
                 continue;
@@ -116,13 +116,16 @@ pub fn index_open_file_imports(
 
 fn resolved_import_paths(
     workspace: &FoundryWorkspace,
+    remappings: &[Remapping],
     resolver: &FoundryResolver,
     current_path: &NormalizedPath,
     text: &str,
     allow_solar_fallback: bool,
 ) -> Vec<NormalizedPath> {
     match resolver.resolved_imports(current_path, text) {
-        Ok(imports) => resolved_imports_with_resolver(workspace, resolver, current_path, imports),
+        Ok(imports) => {
+            resolved_imports_with_resolver(workspace, remappings, resolver, current_path, imports)
+        }
         Err(error) => {
             debug!(
                 ?error,
@@ -135,6 +138,7 @@ fn resolved_import_paths(
                     .filter_map(|path| {
                         resolve_import_path_with_resolver(
                             workspace,
+                            remappings,
                             current_path,
                             &path,
                             Some(resolver),
@@ -150,6 +154,7 @@ fn resolved_import_paths(
 
 fn resolved_imports_with_resolver(
     workspace: &FoundryWorkspace,
+    remappings: &[Remapping],
     resolver: &FoundryResolver,
     current_path: &NormalizedPath,
     imports: Vec<ResolvedImport>,
@@ -160,6 +165,7 @@ fn resolved_imports_with_resolver(
             import.resolved_path.or_else(|| {
                 resolve_import_path_with_resolver(
                     workspace,
+                    remappings,
                     current_path,
                     &import.path,
                     Some(resolver),
@@ -194,9 +200,7 @@ mod tests {
     use std::fs;
 
     use sa_paths::NormalizedPath;
-    use sa_project_model::{
-        FoundryProfile, FoundryResolver, FoundryWorkspace, Remapping, ResolvedImport,
-    };
+    use sa_project_model::{FoundryResolver, FoundryWorkspace, Remapping, ResolvedImport};
     use tempfile::tempdir;
 
     use super::index_workspace;
@@ -243,11 +247,10 @@ contract Unused {}
         fs::write(root.join("lib/unused/Unused.sol"), unused_text).expect("write unused");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default")
-            .with_remappings(vec![Remapping::new("lib/", "lib/forge-std/src/")]);
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = vec![Remapping::new("lib/", "lib/forge-std/src/")];
+        let workspace = FoundryWorkspace::new(root_path);
 
-        let result = index_workspace(&workspace, None).expect("index workspace");
+        let result = index_workspace(&workspace, &remappings).expect("index workspace");
 
         assert!(result_contains_path(
             &result,
@@ -282,10 +285,10 @@ contract Unused {}
         fs::write(root.join("src/Main.sol"), main_text).expect("write main");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
 
-        let result = index_workspace(&workspace, None).expect("index workspace");
+        let result = index_workspace(&workspace, &remappings).expect("index workspace");
 
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.files[0].text, main_text);
@@ -306,10 +309,10 @@ contract Main {}
         fs::write(&main_path, main_text).expect("write main");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
 
-        let result = index_workspace(&workspace, None).expect("index workspace");
+        let result = index_workspace(&workspace, &remappings).expect("index workspace");
 
         assert!(result_contains_path(
             &result,
@@ -337,10 +340,10 @@ contract Main { Dep dep; }
         fs::write(&main_path, main_text).expect("write main");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
 
-        let result = index_workspace(&workspace, None).expect("index workspace");
+        let result = index_workspace(&workspace, &remappings).expect("index workspace");
 
         assert!(result_contains_path(
             &result,
@@ -366,10 +369,10 @@ contract Main { Dep dep; }
         fs::write(&bad_path, [0xff, 0xfe, 0xfd]).expect("write bad");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
 
-        let result = index_workspace(&workspace, None).expect("index workspace");
+        let result = index_workspace(&workspace, &remappings).expect("index workspace");
 
         assert!(result_contains_path(
             &result,
@@ -402,14 +405,14 @@ contract Thing {}
         fs::write(root.join("lib/default/dep/Thing.sol"), dep_text).expect("write default dep");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default").with_remappings(vec![
+        let remappings = vec![
             Remapping::new("dep/", "lib/foo/dep/").with_context("lib/foo"),
             Remapping::new("dep/", "lib/default/dep/"),
-        ]);
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        ];
+        let workspace = FoundryWorkspace::new(root_path);
         let open_path = NormalizedPath::new(root.join("lib/foo/src/Main.sol").to_string_lossy());
 
-        let result = super::index_open_file_imports(&workspace, None, &open_path, open_text)
+        let result = super::index_open_file_imports(&workspace, &remappings, &open_path, open_text)
             .expect("index open file imports");
 
         assert!(result_contains_path(
@@ -442,11 +445,11 @@ contract Main { Dep dep; }
         fs::write(&main_path, disk_text).expect("write main");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
         let open_path = NormalizedPath::new(main_path.to_string_lossy());
 
-        let result = super::index_open_file_imports(&workspace, None, &open_path, open_text)
+        let result = super::index_open_file_imports(&workspace, &remappings, &open_path, open_text)
             .expect("index open file imports");
 
         assert!(result_contains_path(
@@ -486,13 +489,13 @@ contract Main {}
         .expect("write dep");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default").with_remappings(vec![Remapping::new(
+        let remappings = vec![Remapping::new(
             "@openzeppelin/contracts/",
             "lib/openzeppelin-contracts/contracts/",
-        )]);
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        )];
+        let workspace = FoundryWorkspace::new(root_path);
         let open_path = NormalizedPath::new(root.join("src/Main.sol").to_string_lossy());
-        let resolver = FoundryResolver::new(&workspace, None).expect("resolver");
+        let resolver = FoundryResolver::new(&workspace, &remappings).expect("resolver");
 
         let mut imports = resolver
             .resolved_imports(&open_path, open_text)
@@ -501,8 +504,13 @@ contract Main {}
             import.resolved_path = None;
         }
 
-        let resolved =
-            super::resolved_imports_with_resolver(&workspace, &resolver, &open_path, imports);
+        let resolved = super::resolved_imports_with_resolver(
+            &workspace,
+            &remappings,
+            &resolver,
+            &open_path,
+            imports,
+        );
 
         let expected = NormalizedPath::new(
             root.join(
@@ -527,11 +535,11 @@ contract Main {}
 "#;
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
         let open_path = NormalizedPath::new(root.join("src/Main.sol").to_string_lossy());
 
-        let result = super::index_open_file_imports(&workspace, None, &open_path, open_text)
+        let result = super::index_open_file_imports(&workspace, &remappings, &open_path, open_text)
             .expect("index open file imports");
 
         assert!(result_contains_path(&result, &open_path));
@@ -546,9 +554,9 @@ contract Main {}
         fs::create_dir_all(root.join("src")).expect("src dir");
 
         let root_path = NormalizedPath::new(root.to_string_lossy());
-        let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root_path, profile);
-        let resolver = FoundryResolver::new(&workspace, None).expect("resolver");
+        let remappings = Vec::new();
+        let workspace = FoundryWorkspace::new(root_path);
+        let resolver = FoundryResolver::new(&workspace, &remappings).expect("resolver");
         let current_path = NormalizedPath::new("Main.sol");
 
         let imports = vec![ResolvedImport {
@@ -557,8 +565,13 @@ contract Main {}
             aliases: Vec::new(),
         }];
 
-        let resolved =
-            super::resolved_imports_with_resolver(&workspace, &resolver, &current_path, imports);
+        let resolved = super::resolved_imports_with_resolver(
+            &workspace,
+            &remappings,
+            &resolver,
+            &current_path,
+            imports,
+        );
         assert!(resolved.is_empty());
     }
 }

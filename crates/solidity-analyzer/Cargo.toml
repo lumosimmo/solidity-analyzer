@@ -17,6 +17,7 @@ sa-syntax = { path = "../sa-syntax" }
 sa-vfs = { path = "../sa-vfs" }
 sa-toolchain = { path = "../sa-toolchain" }
 foundry-compilers = { version = "0.19", default-features = false, features = ["rustls", "svm-solc"] }
+foundry-config = { workspace = true }
 salsa = "0.25"
 anyhow = "1"
 tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "signal", "time"] }

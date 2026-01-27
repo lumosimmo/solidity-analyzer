@@ -1,7 +1,7 @@
 use sa_paths::NormalizedPath;
 use sa_project_model::{
-    FoundryProfile, FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path,
-    resolve_import_path_with_profile, resolve_import_path_with_resolver,
+    FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path,
+    resolve_import_path_with_resolver,
 };
 
 mod helpers {
@@ -9,74 +9,62 @@ mod helpers {
 
     const ROOT: &str = "/workspace";
 
-    pub fn workspace_with_remappings(remappings: Vec<Remapping>) -> FoundryWorkspace {
+    pub fn workspace() -> FoundryWorkspace {
         let root = NormalizedPath::new(ROOT);
-        let profile = FoundryProfile::new("default").with_remappings(remappings);
-        FoundryWorkspace::new(root, profile)
+        FoundryWorkspace::new(root)
     }
 
     pub fn workspace_path(path: &str) -> NormalizedPath {
         NormalizedPath::new(format!("{ROOT}/{path}"))
     }
 
-    pub fn resolver_for_workspace(workspace: &FoundryWorkspace) -> FoundryResolver {
-        FoundryResolver::new(workspace, None).expect("resolver")
+    pub fn resolver_for_workspace(
+        workspace: &FoundryWorkspace,
+        remappings: &[Remapping],
+    ) -> FoundryResolver {
+        FoundryResolver::new(workspace, remappings).expect("resolver")
     }
 
     pub fn assert_resolves_like_foundry(
         workspace: &FoundryWorkspace,
+        remappings: &[Remapping],
         importer: &NormalizedPath,
         import_path: &str,
-        profile: Option<&str>,
     ) {
-        let expected = FoundryResolver::new(workspace, profile)
+        let expected = FoundryResolver::new(workspace, remappings)
             .expect("resolver")
             .resolve_import_path(importer, import_path);
-        let actual = resolve_import_path_with_profile(workspace, importer, import_path, profile);
+        let actual = resolve_import_path(workspace, remappings, importer, import_path);
         assert_eq!(actual, expected);
     }
 }
 
 #[test]
-fn named_profile_inherits_default_remappings_when_empty() {
-    let default_remappings = vec![Remapping::new("dep/", "lib/dep/")];
-    let mut workspace = helpers::workspace_with_remappings(default_remappings.clone());
-    workspace.add_profile(FoundryProfile::new("dev"));
-
-    let resolved = workspace.profile(Some("dev"));
-
-    assert_eq!(resolved.remappings(), default_remappings.as_slice());
-}
-
-#[test]
-fn missing_profile_returns_default() {
-    let workspace = helpers::workspace_with_remappings(vec![Remapping::new("dep/", "lib/dep/")]);
-
-    let resolved = workspace.profile(Some("unknown"));
-
-    assert_eq!(resolved.name(), "default");
-    assert_eq!(resolved.remappings().len(), 1);
-}
-
-#[test]
-fn resolve_import_path_defaults_profile_and_uses_remappings() {
-    let workspace = helpers::workspace_with_remappings(vec![Remapping::new("dep/", "lib/dep/")]);
+fn resolve_import_path_uses_remappings() {
+    let remappings = vec![Remapping::new("dep/", "lib/dep/")];
+    let workspace = helpers::workspace();
     let importer = helpers::workspace_path("src/Main.sol");
 
-    let resolved = resolve_import_path(&workspace, &importer, "dep/Thing.sol");
-    let expected =
-        helpers::resolver_for_workspace(&workspace).resolve_import_path(&importer, "dep/Thing.sol");
+    let resolved = resolve_import_path(&workspace, &remappings, &importer, "dep/Thing.sol");
+    let expected = helpers::resolver_for_workspace(&workspace, &remappings)
+        .resolve_import_path(&importer, "dep/Thing.sol");
     assert_eq!(resolved, expected);
 }
 
 #[test]
 fn resolve_import_path_with_resolver_prefers_adapter_when_available() {
-    let workspace = helpers::workspace_with_remappings(vec![Remapping::new("dep/", "lib/dep/")]);
-    let resolver = helpers::resolver_for_workspace(&workspace);
+    let remappings = vec![Remapping::new("dep/", "lib/dep/")];
+    let workspace = helpers::workspace();
+    let resolver = helpers::resolver_for_workspace(&workspace, &remappings);
     let importer = helpers::workspace_path("src/Main.sol");
 
-    let resolved =
-        resolve_import_path_with_resolver(&workspace, &importer, "dep/Thing.sol", Some(&resolver));
+    let resolved = resolve_import_path_with_resolver(
+        &workspace,
+        &remappings,
+        &importer,
+        "dep/Thing.sol",
+        Some(&resolver),
+    );
 
     assert_eq!(
         resolved,
@@ -86,35 +74,44 @@ fn resolve_import_path_with_resolver_prefers_adapter_when_available() {
 
 #[test]
 fn resolve_import_path_with_resolver_falls_back_without_resolver() {
-    let workspace = helpers::workspace_with_remappings(vec![Remapping::new("dep/", "lib/dep/")]);
+    let remappings = vec![Remapping::new("dep/", "lib/dep/")];
+    let workspace = helpers::workspace();
     let importer = helpers::workspace_path("src/Main.sol");
 
-    let resolved = resolve_import_path_with_resolver(&workspace, &importer, "dep/Thing.sol", None);
+    let resolved = resolve_import_path_with_resolver(
+        &workspace,
+        &remappings,
+        &importer,
+        "dep/Thing.sol",
+        None,
+    );
 
     assert_eq!(
         resolved,
-        resolve_import_path(&workspace, &importer, "dep/Thing.sol")
+        resolve_import_path(&workspace, &remappings, &importer, "dep/Thing.sol")
     );
 }
 
 #[test]
 fn remapping_skips_shorter_contexts_after_match() {
-    let workspace = helpers::workspace_with_remappings(vec![
+    let remappings = vec![
         Remapping::new("dep/", "lib/foo/dep/").with_context("lib/foo"),
         Remapping::new("dep/", "lib/default/dep/"),
-    ]);
+    ];
+    let workspace = helpers::workspace();
     let importer = helpers::workspace_path("lib/foo/src/Main.sol");
 
-    helpers::assert_resolves_like_foundry(&workspace, &importer, "dep/Thing.sol", None);
+    helpers::assert_resolves_like_foundry(&workspace, &remappings, &importer, "dep/Thing.sol");
 }
 
 #[test]
 fn remapping_ignores_non_matching_prefix_before_match() {
-    let workspace = helpers::workspace_with_remappings(vec![
+    let remappings = vec![
         Remapping::new("lib/", "lib/default/"),
         Remapping::new("dep/", "lib/dep/"),
-    ]);
+    ];
+    let workspace = helpers::workspace();
     let importer = helpers::workspace_path("src/Main.sol");
 
-    helpers::assert_resolves_like_foundry(&workspace, &importer, "dep/Thing.sol", None);
+    helpers::assert_resolves_like_foundry(&workspace, &remappings, &importer, "dep/Thing.sol");
 }

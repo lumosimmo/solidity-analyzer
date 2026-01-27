@@ -19,7 +19,7 @@ const STALE_TIMEOUT: Duration = Duration::from_secs(1);
 fn make_config(root: &Path, solc_path: &Path) -> ResolvedFoundryConfig {
     let root_path = NormalizedPath::new(root.to_string_lossy());
     let profile = FoundryProfile::new("default").with_solc_version(solc_path.to_string_lossy());
-    let workspace = FoundryWorkspace::new(root_path.clone(), profile.clone());
+    let workspace = FoundryWorkspace::new(root_path.clone());
     let mut foundry_config = Config::with_root(PathBuf::from(root_path.as_str()));
     foundry_config.solc = Some(SolcReq::Local(solc_path.to_path_buf()));
     let foundry_config = foundry_config.sanitized();

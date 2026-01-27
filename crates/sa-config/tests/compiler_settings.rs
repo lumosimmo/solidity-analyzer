@@ -33,7 +33,7 @@ libs = ["lib"]
 
     let root_path = NormalizedPath::new(root.to_string_lossy());
     let profile = FoundryProfile::new("default");
-    let workspace = FoundryWorkspace::new(root_path, profile.clone());
+    let workspace = FoundryWorkspace::new(root_path);
     let resolved =
         ResolvedFoundryConfig::new(workspace, profile).with_foundry_config(expected.clone());
 

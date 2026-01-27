@@ -37,7 +37,7 @@ function topLevel() {}
 
     let root = NormalizedPath::new("/workspace");
     let default_profile = FoundryProfile::new("default");
-    let workspace = FoundryWorkspace::new(root, default_profile.clone());
+    let workspace = FoundryWorkspace::new(root);
     let config = ResolvedFoundryConfig::new(workspace.clone(), default_profile);
 
     let mut host = AnalysisHost::new();

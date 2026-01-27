@@ -36,8 +36,8 @@ pub fn reload(state: &mut ServerState) -> anyhow::Result<()> {
 
 fn apply_config(state: &mut ServerState, resolved: ResolvedFoundryConfig) -> anyhow::Result<()> {
     let workspace = resolved.workspace().clone();
-    let active_profile = resolved.active_profile().name();
-    let index_result = indexer::index_workspace(&workspace, Some(active_profile))?;
+    let remappings = resolved.active_profile().remappings();
+    let index_result = indexer::index_workspace(&workspace, remappings)?;
 
     let mut changes = Vec::new();
     let mut new_indexed_paths = std::collections::HashSet::new();

@@ -5,7 +5,7 @@ use sa_base_db::{Database, FileId, LanguageKind, ProjectId};
 use sa_config::ResolvedFoundryConfig;
 use sa_hir::{Definition, DefinitionLocation, Semantics};
 use sa_paths::NormalizedPath;
-use sa_project_model::{FoundryResolver, FoundryWorkspace};
+use sa_project_model::{FoundryProfile, FoundryResolver, FoundryWorkspace};
 use sa_span::{TextRange, TextSize};
 use sa_vfs::VfsSnapshot;
 use tracing::debug;
@@ -96,7 +96,7 @@ impl AnalysisHost {
         if let Some(config) = change.config {
             self.db.set_project_input(self.project_id, Arc::new(config));
         } else if let Some(workspace) = change.workspace {
-            let active_profile = workspace.profile(None);
+            let active_profile = FoundryProfile::new("default");
             let config = ResolvedFoundryConfig::new(workspace, active_profile);
             self.db.set_project_input(self.project_id, Arc::new(config));
         }
@@ -149,6 +149,13 @@ impl Analysis {
         self.db
             .project_input(self.project_id)
             .workspace(&self.db)
+            .clone()
+    }
+
+    pub fn config(&self) -> Arc<ResolvedFoundryConfig> {
+        self.db
+            .project_input(self.project_id)
+            .config(&self.db)
             .clone()
     }
 
@@ -274,8 +281,10 @@ impl Analysis {
         let parse = sa_syntax::parse_file(&text);
         let current_path = self.db.file_path(file_id);
 
-        let workspace = self.workspace_opt()?;
-        let resolver = FoundryResolver::new(&workspace, None).ok()?;
+        let project = self.db.project_input_opt(self.project_id)?;
+        let workspace = project.workspace(&self.db).clone();
+        let remappings = project.config(&self.db).active_profile().remappings();
+        let resolver = FoundryResolver::new(&workspace, remappings).ok()?;
 
         for (_, directive) in parse.tree().imports() {
             let Some(range) = parse.span_to_text_range(directive.path.span) else {
@@ -327,7 +336,7 @@ mod tests {
 
         let root = NormalizedPath::new("/workspace");
         let default_profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, default_profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace.clone(), default_profile);
 
         let mut host = AnalysisHost::new();

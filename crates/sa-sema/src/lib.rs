@@ -8,7 +8,9 @@ use foundry_compilers::utils::canonicalize;
 use sa_base_db::{FileId, LanguageKind, ProjectInput, SaDatabase, SaDatabaseExt};
 use sa_config::{ResolvedFoundryConfig, solar_opts_from_config};
 use sa_paths::{NormalizedPath, WorkspacePath};
-use sa_project_model::{FoundryResolver, FoundryWorkspace, resolve_import_path_with_resolver};
+use sa_project_model::{
+    FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path_with_resolver,
+};
 use sa_span::{TextRange, TextSize};
 use sa_vfs::{Vfs, VfsChange, VfsSnapshot};
 use solar::interface::diagnostics::{DiagCtxt, ErrorGuaranteed, InMemoryEmitter};
@@ -423,10 +425,9 @@ pub fn sema_snapshot_for_project(
 ) -> SemaSnapshotResult {
     let config = project.config(db).clone();
     let workspace = config.workspace().clone();
-    let active_profile = config.active_profile().name();
+    let remappings = config.active_profile().remappings();
     let (vfs, path_to_file_id) = vfs_snapshot_from_db(db, &workspace);
-    let missing_imports =
-        files_with_missing_imports(db, &workspace, active_profile, &path_to_file_id);
+    let missing_imports = files_with_missing_imports(db, &workspace, remappings, &path_to_file_id);
     let snapshot = SemaSnapshot::new(
         &config,
         &vfs,
@@ -474,11 +475,11 @@ fn vfs_snapshot_from_db(
 fn files_with_missing_imports(
     db: &dyn SemaDatabase,
     workspace: &FoundryWorkspace,
-    active_profile: &str,
+    remappings: &[Remapping],
     path_to_file_id: &HashMap<NormalizedPath, FileId>,
 ) -> HashSet<FileId> {
     let mut missing = HashSet::new();
-    let resolver = FoundryResolver::new(workspace, Some(active_profile)).ok();
+    let resolver = FoundryResolver::new(workspace, remappings).ok();
     for (path, file_id) in path_to_file_id {
         let text = db.file_input(*file_id).text(db);
         let parse = sa_syntax::parse_file(text);
@@ -492,6 +493,7 @@ fn files_with_missing_imports(
                         let resolved = import.resolved_path.or_else(|| {
                             resolve_import_path_with_resolver(
                                 workspace,
+                                remappings,
                                 path,
                                 &import.path,
                                 Some(resolver),
@@ -814,12 +816,9 @@ contract Foo {}
             .expect("fixture");
 
         let root = NormalizedPath::new(fixture.root().to_string_lossy());
-        let default_profile = FoundryProfile::new("default");
-        let mut workspace = FoundryWorkspace::new(root, default_profile.clone());
-        let dev_profile =
+        let workspace = FoundryWorkspace::new(root);
+        let active_profile =
             FoundryProfile::new("dev").with_remappings(vec![Remapping::new("vendor/", "lib/alt/")]);
-        workspace.add_profile(dev_profile);
-        let active_profile = workspace.profile(Some("dev"));
         let config = ResolvedFoundryConfig::new(workspace, active_profile);
         let vfs = fixture.vfs_snapshot();
         let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
@@ -839,7 +838,7 @@ contract Foo {}
         let workspace = db.project_input(project_id).workspace(&db);
         let (_, path_to_file_id) = vfs_snapshot_from_db(&db, workspace.as_ref());
         let missing_default =
-            files_with_missing_imports(&db, workspace.as_ref(), "default", &path_to_file_id);
+            files_with_missing_imports(&db, workspace.as_ref(), &[], &path_to_file_id);
         assert!(
             missing_default.contains(&main_file_id),
             "expected default profile to miss dev remapping imports"

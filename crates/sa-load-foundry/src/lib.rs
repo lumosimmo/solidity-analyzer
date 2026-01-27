@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::{env, mem};
 
 use anyhow::Context;
-use foundry_compilers::artifacts::remappings::RelativeRemapping;
 use foundry_config::{Config, SolcReq};
 use sa_config::ResolvedFoundryConfig;
 use sa_paths::NormalizedPath;
@@ -23,24 +22,11 @@ pub fn load_foundry(root: &Path, profile: Option<&str>) -> anyhow::Result<Resolv
     let script = normalize_path(&root_path, &active_config.script);
     let lib = normalize_lib_path(&root_path, &active_config.libs);
 
-    let default_profile = profile_from_config("default", &active_config);
-    let mut workspace = FoundryWorkspace::from_paths(
-        root_normalized,
-        src,
-        lib,
-        test,
-        script,
-        default_profile.clone(),
-    );
-
-    if profile_name != "default" {
-        let named_profile = profile_from_config(&profile_name, &active_config);
-        workspace.add_profile(named_profile);
-    }
+    let workspace = FoundryWorkspace::from_paths(root_normalized, src, lib, test, script);
 
     let formatter = active_config.fmt.clone();
 
-    let active_profile = workspace.profile(Some(&profile_name));
+    let active_profile = profile_from_config(&profile_name, &active_config);
     Ok(ResolvedFoundryConfig::new(workspace, active_profile)
         .with_formatter_config(formatter)
         .with_foundry_config(active_config))
@@ -69,7 +55,11 @@ fn normalize_lib_path(root: &Path, libs: &[PathBuf]) -> NormalizedPath {
 }
 
 fn profile_from_config(profile: &str, config: &Config) -> FoundryProfile {
-    let remappings = remappings_from_config(config);
+    let remappings: Vec<Remapping> = config
+        .remappings
+        .iter()
+        .map(Remapping::from_relative)
+        .collect();
     let mut profile = FoundryProfile::new(profile);
 
     if let Some(solc) = &config.solc {
@@ -81,19 +71,6 @@ fn profile_from_config(profile: &str, config: &Config) -> FoundryProfile {
     }
 
     profile
-}
-
-fn remappings_from_config(config: &Config) -> Vec<Remapping> {
-    config.remappings.iter().map(remapping_to_model).collect()
-}
-
-fn remapping_to_model(remapping: &RelativeRemapping) -> Remapping {
-    let path = remapping.path.relative().to_string_lossy().to_string();
-    let mut model = Remapping::new(remapping.name.clone(), path);
-    if let Some(context) = &remapping.context {
-        model = model.with_context(context.clone());
-    }
-    model
 }
 
 fn solc_version(solc: &SolcReq) -> String {

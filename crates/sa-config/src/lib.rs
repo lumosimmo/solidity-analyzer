@@ -5,8 +5,8 @@ use foundry_compilers::artifacts::remappings::Remapping as FoundryRemapping;
 use foundry_compilers::compilers::multi::MultiCompilerSettings;
 use foundry_compilers::error::SolcError;
 use foundry_compilers::solc::Solc;
-use foundry_config::Config;
 use foundry_config::fmt::FormatterConfig;
+use foundry_config::{Config, figment::Profile};
 use sa_project_model::{FoundryProfile, FoundryWorkspace};
 use solar_config::{ImportRemapping, Opts as SolarOpts};
 
@@ -25,7 +25,8 @@ pub struct ResolvedFoundryConfig {
 impl ResolvedFoundryConfig {
     pub fn new(workspace: FoundryWorkspace, active_profile: FoundryProfile) -> Self {
         let root = PathBuf::from(workspace.root().as_str());
-        let foundry_config = Config::with_root(root).sanitized();
+        let mut foundry_config = Config::with_root(root).sanitized();
+        sync_profile(&mut foundry_config, &active_profile);
         Self {
             workspace,
             active_profile,
@@ -64,6 +65,8 @@ impl ResolvedFoundryConfig {
     }
 
     pub fn with_foundry_config(mut self, config: Config) -> Self {
+        let mut config = config;
+        sync_profile(&mut config, &self.active_profile);
         self.foundry_config = config;
         self
     }
@@ -91,6 +94,14 @@ fn solar_remappings(remappings: &[FoundryRemapping]) -> Vec<ImportRemapping> {
         .collect()
 }
 
+fn sync_profile(config: &mut Config, profile: &FoundryProfile) {
+    let selected = Profile::new(profile.name());
+    config.profile = selected.clone();
+    if !config.profiles.contains(&selected) {
+        config.profiles.push(selected);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use sa_paths::NormalizedPath;
@@ -102,7 +113,7 @@ mod tests {
     fn resolved_config_exposes_workspace_and_profile() {
         let root = NormalizedPath::new("/workspace");
         let default_profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, default_profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace.clone(), default_profile.clone());
 
         assert_eq!(config.workspace(), &workspace);

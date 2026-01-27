@@ -272,7 +272,7 @@ mod tests {
         let mut db = Database::default();
         let root = NormalizedPath::new("/workspace");
         let default_profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, default_profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = Arc::new(ResolvedFoundryConfig::new(
             workspace.clone(),
             default_profile,

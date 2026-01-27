@@ -221,7 +221,7 @@ pub fn setup_analysis(
 
     let root = NormalizedPath::new("/workspace");
     let default_profile = FoundryProfile::new("default").with_remappings(remappings);
-    let workspace = FoundryWorkspace::new(root, default_profile.clone());
+    let workspace = FoundryWorkspace::new(root);
     let config = ResolvedFoundryConfig::new(workspace.clone(), default_profile);
 
     let mut host = AnalysisHost::new();
@@ -264,7 +264,7 @@ pub fn setup_db<S: AsRef<str>>(
 
     let root = NormalizedPath::new("/workspace");
     let default_profile = FoundryProfile::new("default").with_remappings(remappings);
-    let workspace = FoundryWorkspace::new(root, default_profile.clone());
+    let workspace = FoundryWorkspace::new(root);
     let config = ResolvedFoundryConfig::new(workspace.clone(), default_profile);
     let project_id = ProjectId::from_raw(0);
     db.set_project_input(project_id, Arc::new(config));

@@ -47,21 +47,21 @@ pub fn did_open(state: &mut ServerState, params: DidOpenTextDocumentParams) {
         }
     }
 
-    let (workspace, profile) = match state.config.as_ref() {
+    let (workspace, remappings) = match state.config.as_ref() {
         Some(config) => (
             config.workspace().clone(),
-            config.active_profile().name().to_string(),
+            config.active_profile().remappings(),
         ),
         None => return,
     };
-    let index_result =
-        match indexer::index_open_file_imports(&workspace, Some(profile.as_str()), &path, &text) {
-            Ok(result) => result,
-            Err(error) => {
-                warn!(?error, path = %path, "did_open: failed to index file imports");
-                return;
-            }
-        };
+    let index_result = match indexer::index_open_file_imports(&workspace, remappings, &path, &text)
+    {
+        Ok(result) => result,
+        Err(error) => {
+            warn!(?error, path = %path, "did_open: failed to index file imports");
+            return;
+        }
+    };
 
     let mut changes = Vec::new();
     for indexed_file in index_result.files {

@@ -4,7 +4,9 @@ use std::path::Path;
 use sa_base_db::{FileId, FileInput, ProjectId, ProjectInput};
 use sa_def::{DefDatabase, DefEntry, DefId, DefKind, DefMap};
 use sa_paths::NormalizedPath;
-use sa_project_model::{FoundryResolver, FoundryWorkspace, resolve_import_path_with_resolver};
+use sa_project_model::{
+    FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path_with_resolver,
+};
 use sa_sema::{ResolveOutcome, ResolvedSymbol, ResolvedSymbolKind, SemaDatabase};
 use sa_span::{TextRange, TextSize};
 use sa_syntax::ast::ItemKind;
@@ -660,6 +662,7 @@ impl Import {
 #[salsa::tracked]
 pub fn lowered_program_for_project(db: &dyn HirDatabase, project: ProjectInput) -> HirProgram {
     let workspace = project.workspace(db).clone();
+    let remappings = project.config(db).active_profile().remappings();
     let mut def_db = DefDatabase::new();
     let mut file_texts = Vec::new();
     let mut files = HashMap::new();
@@ -676,7 +679,14 @@ pub fn lowered_program_for_project(db: &dyn HirDatabase, project: ProjectInput) 
 
         let path = db.file_path(file_id);
         let parsed = parse_file(db, db.file_input(file_id));
-        let imports = collect_imports(&workspace, &path, parsed, &path_to_file_id, &text);
+        let imports = collect_imports(
+            &workspace,
+            remappings,
+            &path,
+            parsed,
+            &path_to_file_id,
+            &text,
+        );
         files.insert(
             file_id,
             HirFile {
@@ -866,12 +876,13 @@ fn contract_base_paths(contract: &sa_syntax::ast::ItemContract<'_>) -> Vec<Vec<S
 
 fn collect_imports(
     workspace: &FoundryWorkspace,
+    remappings: &[Remapping],
     current_path: &NormalizedPath,
     parsed: &ParsedFile,
     path_to_file_id: &HashMap<String, FileId>,
     text: &str,
 ) -> Vec<Import> {
-    let resolver = FoundryResolver::new(workspace, None).ok();
+    let resolver = FoundryResolver::new(workspace, remappings).ok();
     let resolved_by_path = resolver
         .as_ref()
         .and_then(|resolver| resolver.resolved_imports(current_path, text).ok())
@@ -895,6 +906,7 @@ fn collect_imports(
                 .or_else(|| {
                     resolve_import_path_with_resolver(
                         workspace,
+                        remappings,
                         current_path,
                         &path,
                         resolver.as_ref(),

@@ -31,7 +31,7 @@ contract LintTest {
 
     let root_path = NormalizedPath::new(root.to_string_lossy());
     let profile = FoundryProfile::new("default");
-    let workspace = FoundryWorkspace::new(root_path, profile.clone());
+    let workspace = FoundryWorkspace::new(root_path);
     let config = ResolvedFoundryConfig::new(workspace, profile);
 
     let lints = collect_solar_lints(&config, &[file_path]).expect("collect lints");

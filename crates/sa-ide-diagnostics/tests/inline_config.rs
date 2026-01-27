@@ -15,7 +15,7 @@ fn setup_config(root: &Path) -> ResolvedFoundryConfig {
 
     let root_path = NormalizedPath::new(root.to_string_lossy());
     let profile = FoundryProfile::new("default");
-    let workspace = FoundryWorkspace::new(root_path, profile.clone());
+    let workspace = FoundryWorkspace::new(root_path);
     ResolvedFoundryConfig::new(workspace, profile)
 }
 

@@ -55,8 +55,8 @@ remappings = ["lib/=lib/forge-std/src/"]
         workspace.root(),
         &NormalizedPath::new(root.to_string_lossy())
     );
-    let profile = workspace.profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping");
     assert!(target.ends_with("lib/forge-std/src/"));
     drop(analysis);
@@ -76,8 +76,8 @@ remappings = ["lib/=lib/updated/src/"]
     send_notification(&mut service, "workspace/didChangeWatchedFiles", watched).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping after reload");
     assert!(target.ends_with("lib/updated/src/"));
 }
@@ -151,8 +151,8 @@ async fn reloads_when_remappings_txt_changes() {
     let mut service = initialize_server(Some(root_uri.clone()), None).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping");
     assert!(target.ends_with("lib/old/src/"));
     drop(analysis);
@@ -168,8 +168,8 @@ async fn reloads_when_remappings_txt_changes() {
     send_notification(&mut service, "workspace/didChangeWatchedFiles", watched).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping after reload");
     assert!(target.ends_with("lib/new/src/"));
 }
@@ -190,8 +190,8 @@ remappings = ["lib/=lib/old/src/"]
     let mut service = initialize_server(Some(root_uri.clone()), None).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping");
     assert!(target.ends_with("lib/old/src/"));
     drop(analysis);
@@ -214,8 +214,8 @@ remappings = ["lib/=lib/new/src/"]
     send_notification(&mut service, "workspace/didChangeWatchedFiles", watched).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping after change");
     assert!(target.ends_with("lib/old/src/"));
 }
@@ -249,8 +249,8 @@ remappings = ["lib/=lib/new/src/"]
     send_notification(&mut service, "workspace/didChangeWatchedFiles", watched).await;
 
     let (analysis, _) = service.inner().snapshot().await;
-    let profile = analysis.workspace().profile(Some("default"));
-    let remappings = profile.remappings();
+    let config = analysis.config();
+    let remappings = config.active_profile().remappings();
     let target = remapping_target(remappings, "lib/").expect("remapping after create");
     assert!(target.ends_with("lib/new/src/"));
 }

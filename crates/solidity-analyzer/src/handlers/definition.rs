@@ -163,7 +163,7 @@ contract Child is Parent {
         let snapshot = vfs.snapshot();
 
         let profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace.clone(), profile);
         let mut host = AnalysisHost::new();
         let mut change = AnalysisChange::new();

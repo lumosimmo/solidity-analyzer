@@ -745,7 +745,7 @@ mod tests {
         let solc_path = write_stub_solc(temp.path(), "0.8.20", None);
         let root = NormalizedPath::new(temp.path().to_string_lossy());
         let profile = FoundryProfile::new("default").with_solc_version(solc_path.to_string_lossy());
-        let workspace = FoundryWorkspace::new(root, profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace, profile);
 
         let prompt = detect_missing_solc_prompt(config).expect("prompt result");
@@ -761,7 +761,7 @@ mod tests {
 
         let root = NormalizedPath::new("/workspace");
         let profile = FoundryProfile::new("default").with_solc_version("99.99.99");
-        let workspace = FoundryWorkspace::new(root, profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace, profile);
 
         let prompt = detect_missing_solc_prompt(config).expect("prompt result");
@@ -794,7 +794,7 @@ mod tests {
 
         let root = NormalizedPath::new(temp.path().to_string_lossy());
         let default_profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, default_profile.clone());
+        let workspace = FoundryWorkspace::new(root);
         let config = ResolvedFoundryConfig::new(workspace, default_profile);
 
         let prompt = detect_missing_solc_prompt(config).expect("prompt result");

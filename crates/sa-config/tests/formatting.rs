@@ -7,7 +7,7 @@ use sa_project_model::{FoundryProfile, FoundryWorkspace};
 fn formatter_config_tracks_foundry_settings() {
     let root = NormalizedPath::new("/workspace");
     let profile = FoundryProfile::new("default");
-    let workspace = FoundryWorkspace::new(root, profile.clone());
+    let workspace = FoundryWorkspace::new(root);
 
     let formatter = FormatterConfig {
         line_length: 88,

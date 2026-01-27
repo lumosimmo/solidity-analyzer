@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use foundry_compilers::{
     ProjectPathsConfig, SourceParser,
     artifacts::{
+        remappings::RelativeRemapping,
         remappings::Remapping as FoundryRemapping,
         sources::{Source, Sources},
     },
@@ -43,6 +43,15 @@ impl Remapping {
 
     pub fn to(&self) -> &str {
         &self.to
+    }
+
+    pub fn from_relative(remapping: &RelativeRemapping) -> Self {
+        let path = remapping.path.relative().to_string_lossy().to_string();
+        let mut model = Remapping::new(remapping.name.clone(), path);
+        if let Some(context) = &remapping.context {
+            model = model.with_context(context.clone());
+        }
+        model
     }
 }
 
@@ -83,23 +92,6 @@ impl FoundryProfile {
     pub fn remappings(&self) -> &[Remapping] {
         &self.remappings
     }
-
-    fn overlay(default: &FoundryProfile, named: &FoundryProfile) -> FoundryProfile {
-        let remappings = if named.remappings.is_empty() {
-            default.remappings.clone()
-        } else {
-            named.remappings.clone()
-        };
-
-        FoundryProfile {
-            name: named.name.clone(),
-            solc_version: named
-                .solc_version
-                .clone()
-                .or_else(|| default.solc_version.clone()),
-            remappings,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,19 +101,17 @@ pub struct FoundryWorkspace {
     lib: NormalizedPath,
     test: NormalizedPath,
     script: NormalizedPath,
-    default_profile: FoundryProfile,
-    profiles: HashMap<String, FoundryProfile>,
 }
 
 impl FoundryWorkspace {
-    pub fn new(root: NormalizedPath, default_profile: FoundryProfile) -> Self {
+    pub fn new(root: NormalizedPath) -> Self {
         let root_str = root.as_str();
         let src = NormalizedPath::new(format!("{root_str}/src"));
         let lib = NormalizedPath::new(format!("{root_str}/lib"));
         let test = NormalizedPath::new(format!("{root_str}/test"));
         let script = NormalizedPath::new(format!("{root_str}/script"));
 
-        Self::from_paths(root, src, lib, test, script, default_profile)
+        Self::from_paths(root, src, lib, test, script)
     }
 
     pub fn from_paths(
@@ -130,7 +120,6 @@ impl FoundryWorkspace {
         lib: NormalizedPath,
         test: NormalizedPath,
         script: NormalizedPath,
-        default_profile: FoundryProfile,
     ) -> Self {
         Self {
             root,
@@ -138,8 +127,6 @@ impl FoundryWorkspace {
             lib,
             test,
             script,
-            default_profile,
-            profiles: HashMap::new(),
         }
     }
 
@@ -162,22 +149,6 @@ impl FoundryWorkspace {
     pub fn script(&self) -> &NormalizedPath {
         &self.script
     }
-
-    pub fn add_profile(&mut self, profile: FoundryProfile) {
-        self.profiles.insert(profile.name().to_string(), profile);
-    }
-
-    pub fn profile(&self, name: Option<&str>) -> FoundryProfile {
-        let name = match name {
-            None | Some("default") => return self.default_profile.clone(),
-            Some(name) => name,
-        };
-
-        match self.profiles.get(name) {
-            Some(profile) => FoundryProfile::overlay(&self.default_profile, profile),
-            None => self.default_profile.clone(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,10 +164,8 @@ pub struct FoundryResolver {
 }
 
 impl FoundryResolver {
-    pub fn new(workspace: &FoundryWorkspace, profile: Option<&str>) -> Result<Self> {
-        let resolved_profile = workspace.profile(profile);
-        let remappings = resolved_profile.remappings().to_vec();
-        let paths = project_paths_from_config(workspace, &remappings)?;
+    pub fn new(workspace: &FoundryWorkspace, remappings: &[Remapping]) -> Result<Self> {
+        let paths = project_paths_from_config(workspace, remappings)?;
         Ok(Self { paths })
     }
 
@@ -273,15 +242,17 @@ pub fn project_paths_from_config(
 
 pub fn resolve_import_path(
     workspace: &FoundryWorkspace,
+    remappings: &[Remapping],
     current_path: &NormalizedPath,
     import_path: &str,
 ) -> Option<NormalizedPath> {
-    let resolver = FoundryResolver::new(workspace, None).ok()?;
+    let resolver = FoundryResolver::new(workspace, remappings).ok()?;
     resolver.resolve_import_path(current_path, import_path)
 }
 
 pub fn resolve_import_path_with_resolver(
     workspace: &FoundryWorkspace,
+    remappings: &[Remapping],
     current_path: &NormalizedPath,
     import_path: &str,
     resolver: Option<&FoundryResolver>,
@@ -289,18 +260,8 @@ pub fn resolve_import_path_with_resolver(
     if let Some(resolver) = resolver {
         resolver.resolve_import_path(current_path, import_path)
     } else {
-        resolve_import_path(workspace, current_path, import_path)
+        resolve_import_path(workspace, remappings, current_path, import_path)
     }
-}
-
-pub fn resolve_import_path_with_profile(
-    workspace: &FoundryWorkspace,
-    current_path: &NormalizedPath,
-    import_path: &str,
-    profile: Option<&str>,
-) -> Option<NormalizedPath> {
-    let resolver = FoundryResolver::new(workspace, profile).ok()?;
-    resolver.resolve_import_path(current_path, import_path)
 }
 
 fn normalize_import_path(path: &str) -> std::borrow::Cow<'_, str> {
@@ -313,61 +274,17 @@ fn normalize_import_path(path: &str) -> std::borrow::Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FoundryProfile, FoundryResolver, FoundryWorkspace, Remapping};
+    use super::FoundryWorkspace;
     use sa_paths::NormalizedPath;
 
     #[test]
     fn workspace_paths_are_wired() {
         let root = NormalizedPath::new("/workspace");
-        let default_profile = FoundryProfile::new("default");
-        let workspace = FoundryWorkspace::new(root, default_profile);
+        let workspace = FoundryWorkspace::new(root);
 
         assert_eq!(workspace.src().as_str(), "/workspace/src");
         assert_eq!(workspace.lib().as_str(), "/workspace/lib");
         assert_eq!(workspace.test().as_str(), "/workspace/test");
         assert_eq!(workspace.script().as_str(), "/workspace/script");
-    }
-
-    #[test]
-    fn profiles_overlay_default_settings() {
-        let root = NormalizedPath::new("/workspace");
-        let default_profile = FoundryProfile::new("default")
-            .with_solc_version("0.8.20")
-            .with_remappings(vec![Remapping::new("lib/", "lib/forge-std/")]);
-
-        let mut workspace = FoundryWorkspace::new(root, default_profile.clone());
-        let dev_profile = FoundryProfile::new("dev")
-            .with_remappings(vec![Remapping::new("src/", "src/overrides/")]);
-        workspace.add_profile(dev_profile);
-
-        let resolved = workspace.profile(Some("dev"));
-        assert_eq!(resolved.solc_version(), Some("0.8.20"));
-        assert_eq!(resolved.remappings().len(), 1);
-        assert_eq!(resolved.remappings()[0].from(), "src/");
-        assert_eq!(resolved.remappings()[0].to(), "src/overrides/");
-    }
-
-    #[test]
-    fn resolve_import_path_with_profile_delegates_to_foundry() {
-        let root = NormalizedPath::new("/workspace");
-        let default_profile = FoundryProfile::new("default")
-            .with_remappings(vec![Remapping::new("lib/", "lib/default/")]);
-
-        let mut workspace = FoundryWorkspace::new(root, default_profile);
-        let dev_profile =
-            FoundryProfile::new("dev").with_remappings(vec![Remapping::new("lib/", "lib/dev/")]);
-        workspace.add_profile(dev_profile);
-
-        let current = NormalizedPath::new("/workspace/src/Main.sol");
-        let resolver = FoundryResolver::new(&workspace, Some("dev")).expect("resolver");
-
-        let resolved = super::resolve_import_path_with_profile(
-            &workspace,
-            &current,
-            "lib/Foo.sol",
-            Some("dev"),
-        );
-        let expected = resolver.resolve_import_path(&current, "lib/Foo.sol");
-        assert_eq!(resolved, expected);
     }
 }

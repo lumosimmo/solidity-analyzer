@@ -6011,6 +6011,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "foundry-compilers",
+ "foundry-config",
  "futures",
  "sa-config",
  "sa-def",

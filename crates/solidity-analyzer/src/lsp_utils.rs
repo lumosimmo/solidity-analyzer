@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use foundry_compilers::utils::canonicalize;
+use foundry_config::Config;
+use foundry_config::utils::find_project_root;
 use sa_paths::NormalizedPath;
 use tower_lsp::lsp_types::Url;
 
@@ -46,18 +48,13 @@ fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
 }
 
 pub fn contains_foundry_config(path: &Path) -> bool {
-    path.join("foundry.toml").is_file() || path.join("remappings.txt").is_file()
+    path.join(Config::FILE_NAME).is_file()
 }
 
 pub fn find_foundry_root(path: &Path) -> Option<NormalizedPath> {
-    let mut current = if path.is_dir() { path } else { path.parent()? };
-
-    loop {
-        if contains_foundry_config(current) {
-            return Some(normalize_path(current));
-        }
-        current = current.parent()?;
-    }
+    let start = if path.is_dir() { path } else { path.parent()? };
+    let root = find_project_root(Some(start)).ok()?;
+    contains_foundry_config(&root).then(|| normalize_path(&root))
 }
 
 #[cfg(test)]
@@ -92,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn find_foundry_root_uses_remappings_file() {
+    fn find_foundry_root_requires_foundry_toml() {
         let temp = tempdir().expect("tempdir");
         let root = temp.path().canonicalize().expect("canonicalize root");
         let nested = root.join("project/src");
@@ -100,8 +97,7 @@ mod tests {
 
         fs::write(root.join("remappings.txt"), "lib/=lib/").expect("write remappings");
 
-        let found = find_foundry_root(&nested).expect("found root");
-        assert_eq!(found.as_str(), root.to_string_lossy());
+        assert!(find_foundry_root(&nested).is_none());
     }
 
     #[test]
@@ -131,12 +127,21 @@ mod tests {
     }
 
     #[test]
-    fn contains_foundry_config_detects_remappings() {
+    fn contains_foundry_config_requires_foundry_toml() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path().canonicalize().expect("canonicalize root");
+        fs::write(root.join("foundry.toml"), "[profile.default]").expect("write foundry.toml");
+
+        assert!(contains_foundry_config(&root));
+    }
+
+    #[test]
+    fn contains_foundry_config_ignores_remappings_only() {
         let temp = tempdir().expect("tempdir");
         let root = temp.path().canonicalize().expect("canonicalize root");
         fs::write(root.join("remappings.txt"), "lib/=lib/").expect("write remappings");
 
-        assert!(contains_foundry_config(&root));
+        assert!(!contains_foundry_config(&root));
     }
 
     #[test]
