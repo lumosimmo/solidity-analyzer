@@ -17,6 +17,19 @@ solidity-analyzer provides IDE features for Solidity development, including:
 - code actions for quick fixes
 - workspace awareness for Foundry projects
 
+## Manual VS Code Extension Install
+
+To build and install the extension manually from source, follow these steps:
+
+```bash
+git clone https://github.com/lumosimmo/solidity-analyzer.git
+cd solidity-analyzer
+cargo run -p xtask -- ext
+code --install-extension editors/code/solidity-analyzer.vsix
+```
+
+If `code` is not available in your shell, use VS Code: `Extensions` -> `...` -> `Install from VSIX...` and select `editors/code/solidity-analyzer.vsix`.
+
 ## Windows Support
 
 Windows support is currently not tested and can be buggy and incomplete. I decided to focus on Unix-like OSes (Linux and macOS) first because I don't have a Windows machine for testing. Pull requests to improve Windows support are welcome.
