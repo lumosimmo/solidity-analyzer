@@ -11,7 +11,7 @@ use sa_paths::{NormalizedPath, WorkspacePath};
 use sa_project_model::{
     FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path_with_resolver,
 };
-use sa_span::{TextRange, TextSize};
+use sa_span::{TextRange, TextSize, is_ident_byte};
 use sa_vfs::{Vfs, VfsChange, VfsSnapshot};
 use solar::interface::diagnostics::{DiagCtxt, ErrorGuaranteed, InMemoryEmitter};
 use solar::interface::source_map::{FileLoader, SourceMap};
@@ -65,7 +65,7 @@ impl SemaSnapshot {
         let (emitter, _buffer) = InMemoryEmitter::new();
         let dcx = DiagCtxt::new(Box::new(emitter));
         let source_map = Arc::new(SourceMap::empty());
-        source_map.set_file_loader(VfsOverlayFileLoader::new(vfs.clone()));
+        source_map.set_file_loader(VfsOverlayFileLoader::new_with_recovery(vfs.clone(), true));
         let opts = solar_opts_from_config(config);
         let session = Session::builder()
             .dcx(dcx)
@@ -579,7 +579,7 @@ fn collect_workspace_files(
             }
             let text = vfs.file_text(file_id)?;
             let parse = sa_syntax::parse_file(text);
-            if !parse.errors().is_empty() {
+            if !parse.errors().is_empty() && recover_source_text(text).is_none() {
                 return None;
             }
             Some(PathBuf::from(path.as_str()))
@@ -638,13 +638,19 @@ fn file_id_for_path(
 pub struct VfsOverlayFileLoader {
     snapshot: VfsSnapshot,
     fallback: solar::interface::source_map::RealFileLoader,
+    recover_bodies: bool,
 }
 
 impl VfsOverlayFileLoader {
     pub fn new(snapshot: VfsSnapshot) -> Self {
+        Self::new_with_recovery(snapshot, false)
+    }
+
+    pub fn new_with_recovery(snapshot: VfsSnapshot, recover_bodies: bool) -> Self {
         Self {
             snapshot,
             fallback: solar::interface::source_map::RealFileLoader,
+            recover_bodies,
         }
     }
 
@@ -652,7 +658,13 @@ impl VfsOverlayFileLoader {
         let normalized = self.normalized_path_for(path);
         let file_id = self.snapshot.file_id(&normalized)?;
         let text = self.snapshot.file_text(file_id)?;
-        Some(text.to_string())
+        let text = text.to_string();
+        if self.recover_bodies
+            && let Some(recovered) = recover_source_text(&text)
+        {
+            return Some(recovered);
+        }
+        Some(text)
     }
 
     fn normalized_path_for(&self, path: &Path) -> NormalizedPath {
@@ -670,6 +682,155 @@ impl VfsOverlayFileLoader {
         };
         NormalizedPath::new(canonical.to_string_lossy())
     }
+}
+
+fn recover_source_text(text: &str) -> Option<String> {
+    if sa_syntax::parse_file(text).errors().is_empty() {
+        return None;
+    }
+
+    let mut bytes = text.as_bytes().to_vec();
+    let len = bytes.len();
+    let mut i = 0usize;
+    let mut brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut pending_fn = false;
+    let mut pending_fn_depth = 0usize;
+    let mut in_body = false;
+    let mut body_start = 0usize;
+    let mut body_depth = 0usize;
+    let mut recovered = false;
+
+    while i < len {
+        match bytes[i] {
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                i = skip_line_comment(&bytes, i);
+                continue;
+            }
+            b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+                i = skip_block_comment(&bytes, i);
+                continue;
+            }
+            b'"' | b'\'' => {
+                i = skip_string(&bytes, i);
+                continue;
+            }
+            _ => {}
+        }
+
+        let b = bytes[i];
+        if is_ident_byte(b) {
+            let start = i;
+            let mut end = i + 1;
+            while end < len && is_ident_byte(bytes[end]) {
+                end += 1;
+            }
+            if !in_body
+                && paren_depth == 0
+                && let Ok(ident) = std::str::from_utf8(&bytes[start..end])
+                && is_function_header_keyword(ident)
+            {
+                pending_fn = true;
+                pending_fn_depth = brace_depth;
+            }
+            i = end;
+            continue;
+        }
+
+        match b {
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'{' => {
+                if pending_fn && paren_depth == 0 && brace_depth == pending_fn_depth {
+                    in_body = true;
+                    body_start = i + 1;
+                    body_depth = brace_depth + 1;
+                    pending_fn = false;
+                }
+                brace_depth += 1;
+            }
+            b'}' => {
+                if in_body && brace_depth == body_depth {
+                    blank_range(&mut bytes, body_start, i);
+                    recovered = true;
+                    in_body = false;
+                }
+                brace_depth = brace_depth.saturating_sub(1);
+            }
+            b';' => {
+                if pending_fn && paren_depth == 0 && brace_depth == pending_fn_depth {
+                    pending_fn = false;
+                }
+            }
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    if in_body {
+        blank_range(&mut bytes, body_start, len);
+        recovered = true;
+    }
+
+    if !recovered {
+        return None;
+    }
+
+    let recovered = String::from_utf8(bytes).ok()?;
+    if sa_syntax::parse_file(&recovered).errors().is_empty() {
+        Some(recovered)
+    } else {
+        None
+    }
+}
+
+fn skip_line_comment(bytes: &[u8], mut i: usize) -> usize {
+    i += 2;
+    while i < bytes.len() && bytes[i] != b'\n' {
+        i += 1;
+    }
+    i
+}
+
+fn skip_block_comment(bytes: &[u8], mut i: usize) -> usize {
+    i += 2;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+fn skip_string(bytes: &[u8], mut i: usize) -> usize {
+    let quote = bytes[i];
+    i += 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i = i.saturating_add(2),
+            b if b == quote => return i + 1,
+            _ => i += 1,
+        }
+    }
+    bytes.len()
+}
+
+fn blank_range(bytes: &mut [u8], start: usize, end: usize) {
+    let end = end.min(bytes.len());
+    for b in &mut bytes[start..end] {
+        if *b != b'\n' && *b != b'\r' {
+            *b = b' ';
+        }
+    }
+}
+
+fn is_function_header_keyword(ident: &str) -> bool {
+    matches!(
+        ident,
+        "function" | "modifier" | "constructor" | "fallback" | "receive"
+    )
 }
 
 impl FileLoader for VfsOverlayFileLoader {
@@ -902,7 +1063,7 @@ contract Dep {}
     }
 
     #[test]
-    fn collect_workspace_files_ignores_invalid_and_non_solidity() {
+    fn collect_workspace_files_skips_unrecoverable_solidity() {
         let fixture = FixtureBuilder::new()
             .expect("fixture builder")
             .file(

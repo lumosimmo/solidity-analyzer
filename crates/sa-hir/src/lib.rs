@@ -8,7 +8,7 @@ use sa_project_model::{
     FoundryResolver, FoundryWorkspace, Remapping, resolve_import_path_with_resolver,
 };
 use sa_sema::{ResolveOutcome, ResolvedSymbol, ResolvedSymbolKind, SemaDatabase};
-use sa_span::{TextRange, TextSize};
+use sa_span::{TextRange, TextSize, is_ident_byte};
 use sa_syntax::ast::ItemKind;
 use sa_syntax::tokens::IdentRangeCollector;
 use sa_syntax::{Parse, ParsedImport, ParsedImportItems};
@@ -730,7 +730,7 @@ pub fn contract_member_definitions_at_offset(
 ) -> Vec<VisibleDefinition> {
     let text = db.file_input(file_id).text(db);
     let parse = sa_syntax::parse_file(text.as_ref());
-    let Some(contract_info) = contract_info_at_offset(&parse, offset) else {
+    let Some(contract_info) = contract_info_at_offset(&parse, text.as_ref(), offset) else {
         return Vec::new();
     };
     let program = lowered_program(db, project_id);
@@ -742,7 +742,12 @@ struct ContractInfo {
     bases: Vec<Vec<String>>,
 }
 
-fn contract_info_at_offset(parse: &Parse, offset: TextSize) -> Option<ContractInfo> {
+fn contract_info_at_offset(parse: &Parse, text: &str, offset: TextSize) -> Option<ContractInfo> {
+    contract_info_at_offset_from_parse(parse, offset)
+        .or_else(|| contract_info_at_offset_fallback(text, offset))
+}
+
+fn contract_info_at_offset_from_parse(parse: &Parse, offset: TextSize) -> Option<ContractInfo> {
     parse.with_session(|| {
         for item in parse.tree().items.iter() {
             if let ItemKind::Contract(contract) = &item.kind {
@@ -759,6 +764,468 @@ fn contract_info_at_offset(parse: &Parse, offset: TextSize) -> Option<ContractIn
     })
 }
 
+fn contract_info_at_offset_fallback(text: &str, offset: TextSize) -> Option<ContractInfo> {
+    let offset = usize::from(offset).min(text.len());
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut scanner = FallbackScanner::new(text);
+    let mut brace_depth = 0usize;
+
+    while let Some(token) = scanner.next_token() {
+        match token.kind {
+            FallbackTokenKind::Punct('{') => brace_depth += 1,
+            FallbackTokenKind::Punct('}') => brace_depth = brace_depth.saturating_sub(1),
+            FallbackTokenKind::Ident(ref ident)
+                if brace_depth == 0 && is_contract_keyword(ident) =>
+            {
+                if let Some(decl) = parse_contract_decl(&mut scanner, text, token.start) {
+                    brace_depth = 0;
+                    if offset >= decl.start && offset <= decl.close_brace {
+                        return Some(ContractInfo {
+                            name: decl.name,
+                            bases: decl.bases,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn is_contract_keyword(ident: &str) -> bool {
+    matches!(ident, "contract" | "library" | "interface")
+}
+
+struct ContractDecl {
+    start: usize,
+    open_brace: usize,
+    close_brace: usize,
+    name: String,
+    bases: Vec<Vec<String>>,
+}
+
+fn parse_contract_decl(
+    scanner: &mut FallbackScanner<'_>,
+    text: &str,
+    contract_start: usize,
+) -> Option<ContractDecl> {
+    let name_token = scanner.next_token()?;
+    let name = match name_token.kind {
+        FallbackTokenKind::Ident(ident) => ident,
+        _ => return None,
+    };
+
+    let mut is_end: Option<usize> = None;
+    let mut open_brace: Option<usize> = None;
+
+    while let Some(token) = scanner.next_token() {
+        match token.kind {
+            FallbackTokenKind::Ident(ident) if ident == "is" => {
+                is_end = Some(token.end);
+            }
+            FallbackTokenKind::Punct('{') => {
+                open_brace = Some(token.start);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let open_brace = open_brace?;
+    let close_brace = matching_close_brace(text, open_brace).unwrap_or(text.len());
+    scanner.idx = close_brace.saturating_add(1);
+
+    let bases = is_end
+        .map(|start| parse_base_paths_in_range(text, start, open_brace))
+        .unwrap_or_default();
+
+    Some(ContractDecl {
+        start: contract_start,
+        open_brace,
+        close_brace,
+        name,
+        bases,
+    })
+}
+
+fn matching_close_brace(text: &str, open_brace: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if open_brace >= bytes.len() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut i = open_brace.saturating_add(1);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'/' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if next == b'/' {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if next == b'*' {
+                i += 2;
+                while i + 1 < bytes.len() {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if b == b'\'' || b == b'"' {
+            i = skip_string(bytes, i);
+            continue;
+        }
+        if b == b'{' {
+            depth += 1;
+        } else if b == b'}' {
+            if depth == 0 {
+                return Some(i);
+            }
+            depth = depth.saturating_sub(1);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_base_paths_in_range(text: &str, start: usize, end: usize) -> Vec<Vec<String>> {
+    let bytes = text.as_bytes();
+    let mut i = start.min(bytes.len());
+    let end = end.min(bytes.len());
+
+    let mut bases: Vec<Vec<String>> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut paren_depth = 0usize;
+
+    while i < end {
+        let b = bytes[i];
+        if b == b'/' && i + 1 < end {
+            let next = bytes[i + 1];
+            if next == b'/' {
+                i += 2;
+                while i < end && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if next == b'*' {
+                i += 2;
+                while i + 1 < end {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if b == b'\'' || b == b'"' {
+            i = skip_string(bytes, i);
+            continue;
+        }
+        if b == b'(' {
+            paren_depth += 1;
+            i += 1;
+            continue;
+        }
+        if b == b')' {
+            paren_depth = paren_depth.saturating_sub(1);
+            i += 1;
+            continue;
+        }
+        if paren_depth > 0 {
+            i += 1;
+            continue;
+        }
+        if is_ident_byte(b) {
+            let start_ident = i;
+            i += 1;
+            while i < end && is_ident_byte(bytes[i]) {
+                i += 1;
+            }
+            if let Ok(ident) = std::str::from_utf8(&bytes[start_ident..i]) {
+                current.push(ident.to_string());
+            }
+            continue;
+        }
+        if b == b',' {
+            if !current.is_empty() {
+                bases.push(std::mem::take(&mut current));
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+
+    if !current.is_empty() {
+        bases.push(current);
+    }
+
+    bases
+}
+
+fn contract_decl_by_name_fallback(text: &str, contract_name: &str) -> Option<ContractDecl> {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut scanner = FallbackScanner::new(text);
+    let mut brace_depth = 0usize;
+    while let Some(token) = scanner.next_token() {
+        match token.kind {
+            FallbackTokenKind::Punct('{') => brace_depth += 1,
+            FallbackTokenKind::Punct('}') => brace_depth = brace_depth.saturating_sub(1),
+            FallbackTokenKind::Ident(ref ident)
+                if brace_depth == 0 && is_contract_keyword(ident) =>
+            {
+                if let Some(decl) = parse_contract_decl(&mut scanner, text, token.start) {
+                    brace_depth = 0;
+                    if decl.name == contract_name {
+                        return Some(decl);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn fallback_contract_member_definitions(text: &str, contract_name: &str) -> Vec<VisibleDefinition> {
+    let Some(decl) = contract_decl_by_name_fallback(text, contract_name) else {
+        return Vec::new();
+    };
+
+    let mut scanner = FallbackScanner::new(text);
+    scanner.idx = decl.open_brace.saturating_add(1);
+    let mut brace_depth = 1usize;
+
+    let mut defs = Vec::new();
+    let mut seen = HashSet::new();
+    let mut pending_kind: Option<DefKind> = None;
+    let mut statement_idents: Vec<String> = Vec::new();
+    let mut statement_has_decl_keyword = false;
+    let mut statement_skip_variable = false;
+
+    while let Some(token) = scanner.next_token() {
+        if token.start > decl.close_brace {
+            break;
+        }
+        match token.kind {
+            FallbackTokenKind::Ident(ident) => {
+                if brace_depth != 1 {
+                    continue;
+                }
+                if let Some(kind) = pending_kind.take() {
+                    if seen.insert((ident.clone(), kind)) {
+                        defs.push(VisibleDefinition { name: ident, kind });
+                    }
+                    continue;
+                }
+                match ident.as_str() {
+                    "function" => {
+                        pending_kind = Some(DefKind::Function);
+                        statement_has_decl_keyword = true;
+                    }
+                    "event" => {
+                        pending_kind = Some(DefKind::Event);
+                        statement_has_decl_keyword = true;
+                    }
+                    "error" => {
+                        pending_kind = Some(DefKind::Error);
+                        statement_has_decl_keyword = true;
+                    }
+                    "modifier" => {
+                        pending_kind = Some(DefKind::Modifier);
+                        statement_has_decl_keyword = true;
+                    }
+                    "struct" => {
+                        pending_kind = Some(DefKind::Struct);
+                        statement_has_decl_keyword = true;
+                    }
+                    "enum" => {
+                        pending_kind = Some(DefKind::Enum);
+                        statement_has_decl_keyword = true;
+                    }
+                    "type" => {
+                        pending_kind = Some(DefKind::Udvt);
+                        statement_has_decl_keyword = true;
+                    }
+                    "using" | "pragma" | "import" => {
+                        statement_skip_variable = true;
+                    }
+                    _ => {
+                        statement_idents.push(ident);
+                    }
+                }
+            }
+            FallbackTokenKind::Punct('{') => {
+                if brace_depth == 1 {
+                    statement_idents.clear();
+                    statement_has_decl_keyword = false;
+                    statement_skip_variable = false;
+                    pending_kind = None;
+                }
+                brace_depth += 1;
+            }
+            FallbackTokenKind::Punct('}') => {
+                if brace_depth > 0 {
+                    brace_depth = brace_depth.saturating_sub(1);
+                }
+                if brace_depth == 0 {
+                    break;
+                }
+            }
+            FallbackTokenKind::Punct(';') => {
+                if brace_depth == 1 {
+                    if !statement_has_decl_keyword
+                        && !statement_skip_variable
+                        && let Some(name) = statement_idents.last()
+                    {
+                        let name = name.clone();
+                        if seen.insert((name.clone(), DefKind::Variable)) {
+                            defs.push(VisibleDefinition {
+                                name,
+                                kind: DefKind::Variable,
+                            });
+                        }
+                    }
+                    statement_idents.clear();
+                    statement_has_decl_keyword = false;
+                    statement_skip_variable = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    defs
+}
+
+fn skip_string(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start.saturating_add(1);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' {
+            i = i.saturating_add(2);
+            continue;
+        }
+        if b == quote {
+            return i.saturating_add(1);
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+struct FallbackScanner<'a> {
+    bytes: &'a [u8],
+    idx: usize,
+}
+
+struct FallbackToken {
+    kind: FallbackTokenKind,
+    start: usize,
+    end: usize,
+}
+
+enum FallbackTokenKind {
+    Ident(String),
+    Punct(char),
+}
+
+impl<'a> FallbackScanner<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            bytes: text.as_bytes(),
+            idx: 0,
+        }
+    }
+
+    fn next_token(&mut self) -> Option<FallbackToken> {
+        self.skip_trivia();
+        if self.idx >= self.bytes.len() {
+            return None;
+        }
+        let start = self.idx;
+        let b = self.bytes[self.idx];
+        if is_ident_byte(b) {
+            self.idx += 1;
+            while self.idx < self.bytes.len() && is_ident_byte(self.bytes[self.idx]) {
+                self.idx += 1;
+            }
+            let end = self.idx;
+            let ident = std::str::from_utf8(&self.bytes[start..end])
+                .ok()?
+                .to_string();
+            Some(FallbackToken {
+                kind: FallbackTokenKind::Ident(ident),
+                start,
+                end,
+            })
+        } else {
+            self.idx += 1;
+            Some(FallbackToken {
+                kind: FallbackTokenKind::Punct(b as char),
+                start,
+                end: self.idx,
+            })
+        }
+    }
+
+    fn skip_trivia(&mut self) {
+        while self.idx < self.bytes.len() {
+            let b = self.bytes[self.idx];
+            if b.is_ascii_whitespace() {
+                self.idx += 1;
+                continue;
+            }
+            if b == b'/' && self.idx + 1 < self.bytes.len() {
+                let next = self.bytes[self.idx + 1];
+                if next == b'/' {
+                    self.idx += 2;
+                    while self.idx < self.bytes.len() && self.bytes[self.idx] != b'\n' {
+                        self.idx += 1;
+                    }
+                    continue;
+                }
+                if next == b'*' {
+                    self.idx += 2;
+                    while self.idx + 1 < self.bytes.len() {
+                        if self.bytes[self.idx] == b'*' && self.bytes[self.idx + 1] == b'/' {
+                            self.idx += 2;
+                            break;
+                        }
+                        self.idx += 1;
+                    }
+                    continue;
+                }
+            }
+            if b == b'\'' || b == b'"' {
+                self.idx = skip_string(self.bytes, self.idx);
+                continue;
+            }
+            break;
+        }
+    }
+}
+
 fn contract_member_definitions_with_inheritance(
     db: &dyn HirDatabase,
     program: &HirProgram,
@@ -768,11 +1235,13 @@ fn contract_member_definitions_with_inheritance(
     let mut defs = Vec::new();
     let mut seen = HashSet::new();
 
-    merge_visible_definitions(
-        program.contract_member_definitions_in_file(file_id, &contract_info.name),
-        &mut defs,
-        &mut seen,
-    );
+    let mut current_defs =
+        program.contract_member_definitions_in_file(file_id, &contract_info.name);
+    if current_defs.is_empty() {
+        let text = db.file_input(file_id).text(db);
+        current_defs = fallback_contract_member_definitions(text.as_ref(), &contract_info.name);
+    }
+    merge_visible_definitions(current_defs, &mut defs, &mut seen);
 
     let mut visited = HashSet::new();
     let mut pending = Vec::new();
@@ -792,11 +1261,12 @@ fn contract_member_definitions_with_inheritance(
         let base_file_id = entry.location().file_id();
         let base_name = entry.location().name();
 
-        merge_visible_definitions(
-            program.contract_member_definitions_in_file(base_file_id, base_name),
-            &mut defs,
-            &mut seen,
-        );
+        let mut base_defs = program.contract_member_definitions_in_file(base_file_id, base_name);
+        if base_defs.is_empty() {
+            let text = db.file_input(base_file_id).text(db);
+            base_defs = fallback_contract_member_definitions(text.as_ref(), base_name);
+        }
+        merge_visible_definitions(base_defs, &mut defs, &mut seen);
 
         let base_paths = contract_bases_in_file(db, base_file_id, base_name);
         for base_path in base_paths {
@@ -842,7 +1312,18 @@ fn contract_bases_in_file(
 ) -> Vec<Vec<String>> {
     let text = db.file_input(file_id).text(db);
     let parse = sa_syntax::parse_file(text.as_ref());
-    contract_bases_in_parse(&parse, contract_name)
+    let bases = contract_bases_in_parse(&parse, contract_name);
+    if bases.is_empty() {
+        contract_bases_in_file_fallback(text.as_ref(), contract_name)
+    } else {
+        bases
+    }
+}
+
+fn contract_bases_in_file_fallback(text: &str, contract_name: &str) -> Vec<Vec<String>> {
+    contract_decl_by_name_fallback(text, contract_name)
+        .map(|decl| decl.bases)
+        .unwrap_or_default()
 }
 
 fn contract_bases_in_parse(parse: &Parse, contract_name: &str) -> Vec<Vec<String>> {
