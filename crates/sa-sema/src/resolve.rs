@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use sa_base_db::FileId;
-use sa_span::{TextRange, TextSize, range_contains};
+use sa_span::{TextRange, TextSize, is_ident_byte, range_contains};
 use solar::ast::{DataLocation, ImportItems, ItemKind};
 use solar::interface::{Span, source_map::SourceMap};
 use solar::sema::ty::TyKind;
@@ -264,6 +264,11 @@ impl<'gcx> Resolver<'gcx> {
     }
 
     fn visit_expr(&mut self, expr: &hir::Expr<'gcx>) {
+        if let hir::ExprKind::Call(callee, args, _) = &expr.kind
+            && self.handle_named_arg_field(callee, args)
+        {
+            return;
+        }
         let in_expr = self
             .span_to_text_range(expr.span)
             .map(|range| range_contains(range, self.offset))
@@ -475,6 +480,11 @@ impl<'gcx> Resolver<'gcx> {
         args: &hir::CallArgs<'gcx>,
         range: TextRange,
     ) -> CandidateResolution {
+        if let hir::CallArgsKind::Named(_) = args.kind
+            && let Some(struct_id) = self.struct_id_from_res(res)
+        {
+            return self.resolve_item(hir::ItemId::Struct(struct_id), range);
+        }
         let items = res
             .iter()
             .filter_map(|res| match res {
@@ -513,6 +523,18 @@ impl<'gcx> Resolver<'gcx> {
         range: TextRange,
     ) -> Option<CandidateResolution> {
         let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+        if let Some(item_id) = self.contract_type_member_item(ty, ident) {
+            match args {
+                None => return Some(self.resolve_item(item_id, range)),
+                Some(args) => {
+                    if let hir::CallArgsKind::Named(_) = args.kind
+                        && matches!(item_id, hir::ItemId::Struct(_))
+                    {
+                        return Some(self.resolve_item(item_id, range));
+                    }
+                }
+            }
+        }
         let access = if args.is_some() {
             ContractMemberAccess::Call
         } else {
@@ -540,6 +562,13 @@ impl<'gcx> Resolver<'gcx> {
 
         if items.is_empty() {
             return Some(CandidateResolution::Unresolved);
+        }
+
+        if let Some(args) = args
+            && let hir::CallArgsKind::Named(_) = args.kind
+            && let Some(item_id) = self.struct_item_from_items(&items)
+        {
+            return Some(self.resolve_item(item_id, range));
         }
 
         let item_id = match args {
@@ -604,6 +633,165 @@ impl<'gcx> Resolver<'gcx> {
             hir::Res::Err(_) => None,
             _ => Some(self.gcx.type_of_res(*res)),
         })
+    }
+
+    fn struct_id_from_res(&self, res: &[hir::Res]) -> Option<hir::StructId> {
+        let mut found = None;
+        for res in res {
+            if let hir::Res::Item(hir::ItemId::Struct(id)) = res {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(*id);
+            }
+        }
+        found
+    }
+
+    fn struct_item_from_items(&self, items: &[hir::ItemId]) -> Option<hir::ItemId> {
+        let mut found = None;
+        for item_id in items {
+            if matches!(item_id, hir::ItemId::Struct(_)) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(*item_id);
+            }
+        }
+        found
+    }
+
+    fn struct_id_for_callee(&mut self, callee: &hir::Expr<'gcx>) -> Option<hir::StructId> {
+        match &callee.kind {
+            hir::ExprKind::Ident(res) => self.struct_id_from_res(res),
+            hir::ExprKind::Type(ty) | hir::ExprKind::TypeCall(ty) => match ty.kind {
+                hir::TypeKind::Custom(hir::ItemId::Struct(id)) => Some(id),
+                _ => None,
+            },
+            hir::ExprKind::Member(base, ident) => {
+                let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+                if let Some(hir::ItemId::Struct(id)) = self.contract_type_member_item(ty, ident) {
+                    return Some(id);
+                }
+                let items =
+                    self.member_items_for_access(base, ident, ContractMemberAccess::Value)?;
+                self.struct_item_from_items(&items)
+                    .and_then(|item_id| match item_id {
+                        hir::ItemId::Struct(id) => Some(id),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_struct_field(
+        &self,
+        struct_id: hir::StructId,
+        name: &solar::interface::Ident,
+        range: TextRange,
+    ) -> CandidateResolution {
+        let strukt = self.gcx.hir.strukt(struct_id);
+        for &field_id in strukt.fields {
+            let var = self.gcx.hir.variable(field_id);
+            if var.name.is_some_and(|ident| ident.name == name.name) {
+                return self.resolve_item(hir::ItemId::Variable(field_id), range);
+            }
+        }
+        CandidateResolution::Unresolved
+    }
+
+    fn handle_named_arg_field(
+        &mut self,
+        callee: &hir::Expr<'gcx>,
+        args: &hir::CallArgs<'gcx>,
+    ) -> bool {
+        let hir::CallArgsKind::Named(named_args) = args.kind else {
+            return false;
+        };
+        if let Some(range) = self.span_to_text_range(args.span)
+            && !range_contains(range, self.offset)
+        {
+            return false;
+        }
+        let Some(struct_id) = self.struct_id_for_callee(callee) else {
+            return false;
+        };
+        let name_at_offset = self.ident_at_offset(self.offset);
+        for named_arg in named_args {
+            if let Some(range) = self.span_to_text_range(named_arg.name.span)
+                && range_contains(range, self.offset)
+            {
+                let resolution = self.resolve_struct_field(struct_id, &named_arg.name, range);
+                self.consider(range, resolution);
+                return true;
+            }
+            if name_at_offset
+                .as_deref()
+                .is_some_and(|name| name == named_arg.name.as_str())
+            {
+                let range = self
+                    .span_to_text_range(named_arg.name.span)
+                    .unwrap_or_else(|| TextRange::new(self.offset, self.offset));
+                let resolution = self.resolve_struct_field(struct_id, &named_arg.name, range);
+                self.consider(range, resolution);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn ident_at_offset(&self, offset: TextSize) -> Option<String> {
+        let bytes = self.source_text.as_bytes();
+        let mut idx = usize::from(offset).min(bytes.len().saturating_sub(1));
+        if !is_ident_byte(bytes[idx]) {
+            if idx == 0 || !is_ident_byte(bytes[idx - 1]) {
+                return None;
+            }
+            idx = idx.saturating_sub(1);
+        }
+        let mut start = idx;
+        while start > 0 && is_ident_byte(bytes[start - 1]) {
+            start -= 1;
+        }
+        let mut end = idx;
+        while end < bytes.len() && is_ident_byte(bytes[end]) {
+            end += 1;
+        }
+        let snippet = self.source_text.get(start..end)?;
+        if snippet.is_empty() {
+            return None;
+        }
+        Some(snippet.to_string())
+    }
+
+    fn member_items_for_access(
+        &mut self,
+        base: &hir::Expr<'gcx>,
+        ident: &solar::interface::Ident,
+        access: ContractMemberAccess,
+    ) -> Option<Vec<hir::ItemId>> {
+        let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+        let items = if let Some(members) = self.contract_type_members(ty, access) {
+            members
+                .iter()
+                .filter(|member| member.name == ident.name)
+                .map(|member| member.item_id)
+                .collect::<Vec<_>>()
+        } else {
+            let members = self
+                .gcx
+                .members_of(ty, self.source_id, self.current_contract);
+            members
+                .iter()
+                .filter(|member| member.name == ident.name)
+                .filter_map(|member| match member.res {
+                    Some(hir::Res::Item(item_id)) => Some(item_id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        (!items.is_empty()).then_some(items)
     }
 
     fn tuple_receiver_ty(&mut self, exprs: &[Option<&hir::Expr<'gcx>>]) -> Option<Ty<'gcx>> {
@@ -1103,6 +1291,38 @@ impl<'gcx> Resolver<'gcx> {
         bases.contains(&contract_id)
     }
 
+    fn contract_type_member_item(
+        &self,
+        ty: Ty<'gcx>,
+        ident: &solar::interface::Ident,
+    ) -> Option<hir::ItemId> {
+        let contract_id = contract_id_from_type(ty)?;
+        let contract = self.gcx.hir.contract(contract_id);
+        let mut found = None;
+        for &item_id in contract.items {
+            if !matches!(
+                item_id,
+                hir::ItemId::Struct(_)
+                    | hir::ItemId::Enum(_)
+                    | hir::ItemId::Udvt(_)
+                    | hir::ItemId::Error(_)
+            ) {
+                continue;
+            }
+            let Some(name) = self.gcx.item_name_opt(item_id) else {
+                continue;
+            };
+            if name.name != ident.name {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some(item_id);
+        }
+        found
+    }
+
     fn symbol_for_item(
         &self,
         item_id: hir::ItemId,
@@ -1133,7 +1353,10 @@ impl<'gcx> Resolver<'gcx> {
             hir::ItemId::Udvt(_) => ResolvedSymbolKind::Udvt,
             hir::ItemId::Variable(id) => {
                 let var = self.gcx.hir.variable(id);
-                if !matches!(var.kind, hir::VarKind::Global | hir::VarKind::State) {
+                if !matches!(
+                    var.kind,
+                    hir::VarKind::Global | hir::VarKind::State | hir::VarKind::Struct
+                ) {
                     return None;
                 }
                 ResolvedSymbolKind::Variable

@@ -424,6 +424,18 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
     fn visit_expr(&mut self, expr: &hir::Expr<'gcx>) {
         match &expr.kind {
             hir::ExprKind::Call(callee, args, opts) => {
+                if let hir::CallArgsKind::Named(named_args) = args.kind
+                    && let Some(struct_id) = self.struct_id_for_callee(callee)
+                {
+                    for named_arg in named_args {
+                        if let Some(range) = self.span_to_text_range(named_arg.name.span)
+                            && let Some(symbol) =
+                                self.resolve_struct_field(struct_id, &named_arg.name, range)
+                        {
+                            self.record_symbol_reference(&symbol, range);
+                        }
+                    }
+                }
                 match &callee.kind {
                     hir::ExprKind::Ident(res) => {
                         if let Some(range) = self.span_to_text_range(callee.span)
@@ -567,6 +579,11 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         args: &hir::CallArgs<'gcx>,
         range: TextRange,
     ) -> Option<ResolvedSymbol> {
+        if let hir::CallArgsKind::Named(_) = args.kind
+            && let Some(struct_id) = self.struct_id_from_res(res)
+        {
+            return self.resolve_item(hir::ItemId::Struct(struct_id), range);
+        }
         let items = res
             .iter()
             .filter_map(|res| match res {
@@ -614,6 +631,18 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         range: TextRange,
     ) -> Option<ResolvedSymbol> {
         let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+        if let Some(item_id) = self.contract_type_member_item(ty, ident) {
+            match args {
+                None => return self.resolve_item(item_id, range),
+                Some(args) => {
+                    if let hir::CallArgsKind::Named(_) = args.kind
+                        && matches!(item_id, hir::ItemId::Struct(_))
+                    {
+                        return self.resolve_item(item_id, range);
+                    }
+                }
+            }
+        }
         let access = if args.is_some() {
             ContractMemberAccess::Call
         } else {
@@ -638,6 +667,13 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
                 })
                 .collect::<Vec<_>>()
         };
+
+        if let Some(args) = args
+            && let hir::CallArgsKind::Named(_) = args.kind
+            && let Some(item_id) = self.struct_item_from_items(&items)
+        {
+            return self.resolve_item(item_id, range);
+        }
 
         let item_id = match args {
             Some(args) => self.resolve_call_overloads(&items, args),
@@ -697,6 +733,101 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
             hir::Res::Err(_) => None,
             _ => Some(self.gcx.type_of_res(*res)),
         })
+    }
+
+    fn struct_id_from_res(&self, res: &[hir::Res]) -> Option<hir::StructId> {
+        let mut found = None;
+        for res in res {
+            if let hir::Res::Item(hir::ItemId::Struct(id)) = res {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(*id);
+            }
+        }
+        found
+    }
+
+    fn struct_item_from_items(&self, items: &[hir::ItemId]) -> Option<hir::ItemId> {
+        let mut found = None;
+        for item_id in items {
+            if matches!(item_id, hir::ItemId::Struct(_)) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(*item_id);
+            }
+        }
+        found
+    }
+
+    fn struct_id_for_callee(&mut self, callee: &hir::Expr<'gcx>) -> Option<hir::StructId> {
+        match &callee.kind {
+            hir::ExprKind::Ident(res) => self.struct_id_from_res(res),
+            hir::ExprKind::Type(ty) | hir::ExprKind::TypeCall(ty) => match ty.kind {
+                hir::TypeKind::Custom(hir::ItemId::Struct(id)) => Some(id),
+                _ => None,
+            },
+            hir::ExprKind::Member(base, ident) => {
+                let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+                if let Some(hir::ItemId::Struct(id)) = self.contract_type_member_item(ty, ident) {
+                    return Some(id);
+                }
+                let items =
+                    self.member_items_for_access(base, ident, ContractMemberAccess::Value)?;
+                self.struct_item_from_items(&items)
+                    .and_then(|item_id| match item_id {
+                        hir::ItemId::Struct(id) => Some(id),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_struct_field(
+        &self,
+        struct_id: hir::StructId,
+        name: &solar::interface::Ident,
+        range: TextRange,
+    ) -> Option<ResolvedSymbol> {
+        let strukt = self.gcx.hir.strukt(struct_id);
+        for &field_id in strukt.fields {
+            let var = self.gcx.hir.variable(field_id);
+            if var.name.is_some_and(|ident| ident.name == name.name) {
+                return self.resolve_item(hir::ItemId::Variable(field_id), range);
+            }
+        }
+        None
+    }
+
+    fn member_items_for_access(
+        &mut self,
+        base: &hir::Expr<'gcx>,
+        ident: &solar::interface::Ident,
+        access: ContractMemberAccess,
+    ) -> Option<Vec<hir::ItemId>> {
+        let ty = default_memory_if_ref(self.gcx, self.receiver_ty(base)?);
+        let items = if let Some(members) = self.contract_type_members(ty, access) {
+            members
+                .iter()
+                .filter(|member| member.name == ident.name)
+                .map(|member| member.item_id)
+                .collect::<Vec<_>>()
+        } else {
+            let members = self
+                .gcx
+                .members_of(ty, self.source_id, self.current_contract);
+            members
+                .iter()
+                .filter(|member| member.name == ident.name)
+                .filter_map(|member| match member.res {
+                    Some(hir::Res::Item(item_id)) => Some(item_id),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        (!items.is_empty()).then_some(items)
     }
 
     fn tuple_receiver_ty(&mut self, exprs: &[Option<&hir::Expr<'gcx>>]) -> Option<Ty<'gcx>> {
@@ -1149,6 +1280,38 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
         bases.contains(&contract_id)
     }
 
+    fn contract_type_member_item(
+        &self,
+        ty: Ty<'gcx>,
+        ident: &solar::interface::Ident,
+    ) -> Option<hir::ItemId> {
+        let contract_id = contract_id_from_type(ty)?;
+        let contract = self.gcx.hir.contract(contract_id);
+        let mut found = None;
+        for &item_id in contract.items {
+            if !matches!(
+                item_id,
+                hir::ItemId::Struct(_)
+                    | hir::ItemId::Enum(_)
+                    | hir::ItemId::Udvt(_)
+                    | hir::ItemId::Error(_)
+            ) {
+                continue;
+            }
+            let Some(name) = self.gcx.item_name_opt(item_id) else {
+                continue;
+            };
+            if name.name != ident.name {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some(item_id);
+        }
+        found
+    }
+
     fn symbol_for_item(
         &self,
         item_id: hir::ItemId,
@@ -1179,7 +1342,10 @@ impl<'gcx, 'a> ReferenceCollector<'gcx, 'a> {
             hir::ItemId::Udvt(_) => crate::ResolvedSymbolKind::Udvt,
             hir::ItemId::Variable(id) => {
                 let var = self.gcx.hir.variable(id);
-                if !matches!(var.kind, hir::VarKind::Global | hir::VarKind::State) {
+                if !matches!(
+                    var.kind,
+                    hir::VarKind::Global | hir::VarKind::State | hir::VarKind::Struct
+                ) {
                     return None;
                 }
                 crate::ResolvedSymbolKind::Variable

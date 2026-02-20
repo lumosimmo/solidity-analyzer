@@ -150,6 +150,160 @@ contract Derived is Base {
 }
 
 #[test]
+fn resolve_struct_literal_callee_on_rhs() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+struct /*struct_def*/S {
+    uint256 a;
+}
+
+contract Main {
+    function test() public {
+        S memory s = /*call*/S({ a: 1 });
+    }
+}
+"#,
+        &["/*struct_def*/", "/*call*/"],
+    );
+    let def_range = range_from_offset(offsets[0], "S".len());
+    let call_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Struct);
+    assert_eq!(symbol.definition_range, def_range);
+}
+
+#[test]
+fn resolve_struct_literal_field_name() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+struct S {
+    uint256 /*field_def*/a;
+    uint256 b;
+}
+
+contract Main {
+    function test() public {
+        S memory s = S({ /*field_use*/a: 1, b: 2 });
+    }
+}
+"#,
+        &["/*field_def*/", "/*field_use*/"],
+    );
+    let def_range = range_from_offset(offsets[0], "a".len());
+    let use_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, use_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Variable);
+    assert_eq!(symbol.definition_range, def_range);
+}
+
+#[test]
+fn resolve_contract_qualified_struct_literal_callee() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract DutchAuction {
+    struct /*struct_def*/Auction {
+        uint256 startTime;
+    }
+}
+
+contract Main {
+    function test() public {
+        DutchAuction.Auction memory auction = DutchAuction./*call*/Auction({ startTime: 1 });
+    }
+}
+"#,
+        &["/*struct_def*/", "/*call*/"],
+    );
+    let def_range = range_from_offset(offsets[0], "Auction".len());
+    let call_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, call_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Struct);
+    assert_eq!(symbol.definition_range, def_range);
+}
+
+#[test]
+fn resolve_contract_qualified_struct_literal_field() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+contract DutchAuction {
+    struct Auction {
+        uint256 /*field_def*/startTime;
+    }
+}
+
+contract Main {
+    function test() public {
+        DutchAuction.Auction memory auction =
+            DutchAuction.Auction({ /*field_use*/startTime: 1 });
+    }
+}
+"#,
+        &["/*field_def*/", "/*field_use*/"],
+    );
+    let def_range = range_from_offset(offsets[0], "startTime".len());
+    let use_offset = offsets[1];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let (snapshot, _) = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let outcome = resolve_at(&snapshot, main_file_id, use_offset);
+
+    let ResolveOutcome::Resolved(symbol) = outcome else {
+        panic!("expected resolved outcome");
+    };
+
+    assert_eq!(symbol.kind, ResolvedSymbolKind::Variable);
+    assert_eq!(symbol.definition_range, def_range);
+}
+
+#[test]
 fn resolve_unresolved_for_ambiguous_module_alias() {
     let (main_text, offset) = extract_offset(
         r#"
