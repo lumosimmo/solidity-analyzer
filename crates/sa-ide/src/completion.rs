@@ -7,6 +7,16 @@ pub struct CompletionItem {
     pub label: String,
     pub kind: CompletionItemKind,
     pub replacement_range: TextRange,
+    pub detail: Option<String>,
+    pub origin: Option<String>,
+    pub insert_text: Option<String>,
+    pub insert_text_format: CompletionInsertTextFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionInsertTextFormat {
+    Plain,
+    Snippet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +51,17 @@ impl From<sa_ide_completion::CompletionItem> for CompletionItem {
             label: item.label,
             kind: item.kind.into(),
             replacement_range: item.replacement_range,
+            detail: item.detail,
+            origin: item.origin,
+            insert_text: item.insert_text,
+            insert_text_format: match item.insert_text_format {
+                sa_ide_completion::CompletionInsertTextFormat::Plain => {
+                    CompletionInsertTextFormat::Plain
+                }
+                sa_ide_completion::CompletionInsertTextFormat::Snippet => {
+                    CompletionInsertTextFormat::Snippet
+                }
+            },
         }
     }
 }

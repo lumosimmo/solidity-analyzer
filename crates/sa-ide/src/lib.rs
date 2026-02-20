@@ -21,7 +21,7 @@ mod syntax_outline;
 mod syntax_utils;
 
 pub use code_actions::{CodeAction, CodeActionDiagnostic, CodeActionKind};
-pub use completion::{CompletionItem, CompletionItemKind};
+pub use completion::{CompletionInsertTextFormat, CompletionItem, CompletionItemKind};
 pub use hover::HoverResult;
 pub use sa_ide_assists::{SourceChange, SourceFileEdit, TextEdit};
 pub use sa_ide_db::Reference;

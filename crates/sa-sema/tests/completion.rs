@@ -131,6 +131,42 @@ contract Main {
 }
 
 #[test]
+fn identifier_completions_include_struct_literal_fields() {
+    let (main_text, offset) = extract_offset(
+        r#"
+pragma solidity ^0.8.20;
+
+struct Foo {
+    uint256 alpha;
+    uint256 beta;
+}
+
+contract Main {
+    function test() public {
+        Foo memory foo = Foo({ al/*caret*/: 1, beta: 2 });
+    }
+}
+"#,
+    );
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let main_file_id = fixture.file_id("src/Main.sol").expect("main file id");
+    let items = snapshot
+        .identifier_completions(main_file_id, offset)
+        .expect("completions");
+    let labels = completion_labels(&items);
+
+    assert!(labels.contains(&"alpha"));
+    assert!(labels.contains(&"beta"));
+}
+
+#[test]
 fn member_completions_resolve_contract_and_variable_receivers() {
     let (main_text, offsets) = extract_offsets(
         r#"
@@ -184,6 +220,110 @@ contract Main {
     let var_labels = completion_labels(&var_items);
     assert!(var_labels.contains(&"bar"));
     assert!(var_labels.contains(&"value"));
+}
+
+#[test]
+fn member_completions_resolve_import_alias_variable_types() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+pragma solidity ^0.8.20;
+
+import {A as NotA} from "./A.sol";
+
+contract Main {
+    function test() public {
+        NotA a = new NotA();
+        /*not_start*/a/*not_end*/./*not_caret*/a();
+    }
+}
+"#,
+        &["/*not_start*/", "/*not_end*/", "/*not_caret*/"],
+    );
+
+    let not_range = TextRange::new(offsets[0], offsets[1]);
+    let not_offset = offsets[2];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file(
+            "src/A.sol",
+            r#"
+pragma solidity ^0.8.20;
+
+contract A {
+    function a() public {}
+}
+"#,
+        )
+        .file(
+            "src/B.sol",
+            r#"
+pragma solidity ^0.8.20;
+
+contract B {
+    function b() public {}
+}
+"#,
+        )
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let not_items = snapshot
+        .member_completions(file_id, not_offset, not_range, "a")
+        .expect("alias member completions");
+    let not_labels = completion_labels(&not_items);
+    assert!(not_labels.contains(&"a"));
+}
+
+#[test]
+fn member_completions_handle_member_access_on_imported_types() {
+    let (main_text, offsets) = extract_offsets(
+        r#"
+pragma solidity ^0.8.20;
+
+import {A} from "./A.sol";
+
+contract Main {
+    function test() public {
+        A a = new A();
+        /*recv_start*/a/*recv_end*/./*caret*/a();
+    }
+}
+"#,
+        &["/*recv_start*/", "/*recv_end*/", "/*caret*/"],
+    );
+
+    let recv_range = TextRange::new(offsets[0], offsets[1]);
+    let caret_offset = offsets[2];
+
+    let fixture = FixtureBuilder::new()
+        .expect("fixture builder")
+        .file(
+            "src/A.sol",
+            r#"
+pragma solidity ^0.8.20;
+
+contract A {
+    function a() public {}
+}
+"#,
+        )
+        .file("src/Main.sol", main_text)
+        .build()
+        .expect("fixture");
+
+    let snapshot = snapshot_for_fixture(&fixture);
+    let file_id = fixture.file_id("src/Main.sol").expect("main file id");
+
+    let items = snapshot
+        .member_completions(file_id, caret_offset, recv_range, "a")
+        .expect("member completions");
+    let labels = completion_labels(&items);
+    assert!(labels.contains(&"a"));
 }
 
 #[test]

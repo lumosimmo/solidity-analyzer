@@ -1,9 +1,10 @@
-use sa_ide::{CompletionItem, CompletionItemKind};
+use sa_ide::{CompletionInsertTextFormat, CompletionItem, CompletionItemKind};
 use sa_span::lsp::{from_lsp_position, to_lsp_range};
 use sa_vfs::VfsSnapshot;
 use tower_lsp::lsp_types::{
     CompletionItem as LspCompletionItem, CompletionItemKind as LspCompletionItemKind,
-    CompletionParams, CompletionResponse, CompletionTextEdit, InsertTextFormat, TextEdit,
+    CompletionItemLabelDetails, CompletionParams, CompletionResponse, CompletionTextEdit,
+    InsertTextFormat, TextEdit,
 };
 use tracing::debug;
 
@@ -61,13 +62,31 @@ pub fn completion(
 fn completion_item_to_lsp(item: CompletionItem, text: &str) -> LspCompletionItem {
     let range = to_lsp_range(item.replacement_range, text);
     let label = item.label;
+    let insert_text = item.insert_text.clone().unwrap_or_else(|| label.clone());
+    let insert_text_format = match item.insert_text_format {
+        CompletionInsertTextFormat::Plain => InsertTextFormat::PLAIN_TEXT,
+        CompletionInsertTextFormat::Snippet => InsertTextFormat::SNIPPET,
+    };
+    let label_details = item.origin.as_deref().map(|origin| {
+        let description = if origin == "builtin" {
+            "(builtin)".to_string()
+        } else {
+            format!("(from {origin})")
+        };
+        CompletionItemLabelDetails {
+            detail: None,
+            description: Some(description),
+        }
+    });
     LspCompletionItem {
         kind: Some(completion_kind_to_lsp(item.kind)),
+        detail: item.detail,
+        label_details,
         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
             range,
-            new_text: label.clone(),
+            new_text: insert_text,
         })),
-        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+        insert_text_format: Some(insert_text_format),
         label,
         ..LspCompletionItem::default()
     }

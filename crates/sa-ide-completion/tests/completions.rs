@@ -184,6 +184,42 @@ contract Beta {
 }
 
 #[test]
+fn completes_contract_members_with_prefix_when_parse_errors_and_sema_unavailable() {
+    let (text, offset) = extract_offset(
+        r#"
+contract Main {
+    struct Data {
+        uint256 id;
+        string info;
+    }
+
+    function getData() public pure returns (Data memory) {
+        return Data({id: 1, info: "Main Data"});
+    }
+
+    function greet() public pure returns (string memory) {
+        ge/*caret*/
+    }
+}
+"#
+        .trim(),
+    );
+    let files = vec![(NormalizedPath::new("/external/Main.sol"), text)];
+    let (db, project_id, snapshot) = setup_db(files, vec![]);
+    let file_id = snapshot
+        .file_id(&NormalizedPath::new("/external/Main.sol"))
+        .expect("file id");
+
+    let completions = sa_ide_completion::completions(&db, project_id, file_id, offset);
+    let labels = completion_labels(&completions);
+
+    assert!(
+        labels.contains(&"getData()"),
+        "labels missing getData(): {labels:?}"
+    );
+}
+
+#[test]
 fn completes_inherited_members_when_sema_unavailable() {
     let (text, offset) = extract_offset(
         r#"
@@ -220,7 +256,7 @@ contract Base {
     let labels = completion_labels(&completions);
 
     assert!(labels.contains(&"baseValue"));
-    assert!(labels.contains(&"basePing"));
+    assert!(labels.contains(&"basePing()"));
 }
 
 #[test]
@@ -244,13 +280,13 @@ contract Main { function test() public { Foo./*caret*/ } }
         .map(|item| item.label.as_str())
         .collect::<Vec<_>>();
 
-    assert!(labels.contains(&"bar"));
+    assert!(labels.contains(&"bar()"));
     assert!(labels.contains(&"value"));
 
     // Verify kinds for bar (Function) and value (Variable)
     let bar_item = completions
         .iter()
-        .find(|item| item.label == "bar")
+        .find(|item| item.label == "bar()")
         .expect("bar completion item");
     assert_eq!(bar_item.kind, CompletionItemKind::Function);
 
@@ -325,13 +361,77 @@ contract Main {
         .map(|item| item.label.as_str())
         .collect::<Vec<_>>();
 
-    assert!(labels.contains(&"ping"));
+    assert!(labels.contains(&"ping()"));
 
     let ping_item = completions
         .iter()
-        .find(|item| item.label == "ping")
+        .find(|item| item.label == "ping()")
         .expect("ping completion item");
     assert_eq!(ping_item.kind, CompletionItemKind::Function);
+    assert_eq!(ping_item.origin.as_deref(), Some("Base"));
+}
+
+#[test]
+fn completes_function_signature_detail_with_returns() {
+    let (text, offset) = extract_offset(
+        r#"
+contract Main {
+    function foo(uint256 amount, address to) public returns (bool) {}
+    function test() public {
+        Main m;
+        m.f/*caret*/;
+    }
+}
+"#
+        .trim(),
+    );
+    let files = vec![(NormalizedPath::new("/workspace/src/Main.sol"), text)];
+    let (db, project_id, snapshot) = setup_db(files, vec![]);
+    let file_id = snapshot
+        .file_id(&NormalizedPath::new("/workspace/src/Main.sol"))
+        .expect("file id");
+
+    let completions = sa_ide_completion::completions(&db, project_id, file_id, offset);
+    let foo_item = completions
+        .iter()
+        .find(|item| item.label == "foo()")
+        .expect("foo completion item");
+
+    assert_eq!(
+        foo_item.detail.as_deref(),
+        Some("(uint256,address) -> (bool)")
+    );
+}
+
+#[test]
+fn completes_local_member_origin() {
+    let (text, offset) = extract_offset(
+        r#"
+contract Base { function ping() public {} }
+contract Derived is Base { function derived() public {} }
+contract Main {
+    function test() public {
+        Derived d;
+        d.d/*caret*/;
+    }
+}
+"#
+        .trim(),
+    );
+    let files = vec![(NormalizedPath::new("/workspace/src/Main.sol"), text)];
+    let (db, project_id, snapshot) = setup_db(files, vec![]);
+    let file_id = snapshot
+        .file_id(&NormalizedPath::new("/workspace/src/Main.sol"))
+        .expect("file id");
+
+    let completions = sa_ide_completion::completions(&db, project_id, file_id, offset);
+    let derived_item = completions
+        .iter()
+        .find(|item| item.label == "derived()")
+        .expect("derived completion item");
+
+    assert_eq!(derived_item.kind, CompletionItemKind::Function);
+    assert_eq!(derived_item.origin.as_deref(), None);
 }
 
 #[test]
@@ -360,8 +460,8 @@ contract Derived is Mid {
         .map(|item| item.label.as_str())
         .collect::<Vec<_>>();
 
-    assert!(labels.contains(&"ping"));
-    assert!(labels.contains(&"pong"));
+    assert!(labels.contains(&"ping()"));
+    assert!(labels.contains(&"pong()"));
 }
 
 #[test]
@@ -380,6 +480,171 @@ contract Main {
     let labels = completion_labels(&completions);
 
     assert!(labels.contains(&"value"));
+}
+
+#[test]
+fn completes_struct_literal_fields_with_incomplete_name() {
+    let completions = completions_for_main(
+        r#"
+contract Main {
+    struct Data {
+        uint256 id;
+        string info;
+    }
+
+    function test() public pure returns (Data memory) {
+        return Data({id: 1, i/*caret*/});
+    }
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"info"));
+    assert!(!labels.contains(&"id"));
+}
+
+#[test]
+fn completes_struct_literal_fields_without_scope_noise() {
+    let completions = completions_for_main(
+        r#"
+contract Main {
+    struct Data {
+        uint256 id;
+        string info;
+    }
+
+    function getData() public pure returns (Data memory) {
+        return Data({id: 1, /*caret*/});
+    }
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"info"));
+    assert!(!labels.contains(&"id"));
+    assert!(!labels.contains(&"Data"));
+    assert!(!labels.contains(&"getData"));
+    assert!(!labels.contains(&"Main"));
+}
+
+#[test]
+fn completes_named_args_without_scope_noise() {
+    let completions = completions_for_main(
+        r#"
+contract Main {
+    function foo(uint256 id, string memory info) public {}
+
+    function test() public {
+        foo({id: 1, /*caret*/});
+    }
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"info"), "labels: {labels:?}");
+    assert!(!labels.contains(&"id"));
+    assert!(!labels.contains(&"foo"));
+    assert!(!labels.contains(&"foo()"));
+    assert!(!labels.contains(&"Main"));
+}
+
+#[test]
+fn completes_override_list_without_scope_noise() {
+    let completions = completions_for_main(
+        r#"
+contract BaseA {}
+contract BaseB {}
+contract Main is BaseA, BaseB {
+    function foo() internal override(/*caret*/) {}
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"BaseA"));
+    assert!(labels.contains(&"BaseB"));
+    assert!(!labels.contains(&"Main"));
+    assert!(!labels.contains(&"foo"));
+    assert!(!labels.contains(&"foo()"));
+}
+
+#[test]
+fn completes_returns_list_types_only() {
+    let completions = completions_for_main(
+        r#"
+contract Other {}
+contract Main {
+    struct Data { uint256 id; }
+    function foo() public returns (/*caret*/) {}
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"Data"));
+    assert!(labels.contains(&"Other"));
+    assert!(labels.contains(&"uint256"));
+    assert!(!labels.contains(&"foo"));
+    assert!(!labels.contains(&"foo()"));
+}
+
+#[test]
+fn completes_call_options_without_scope_noise() {
+    let completions = completions_for_main(
+        r#"
+contract Main {
+    function foo() public {}
+
+    function test() public {
+        foo{ /*caret*/ }();
+    }
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"gas"));
+    assert!(labels.contains(&"value"));
+    assert!(!labels.contains(&"foo"));
+    assert!(!labels.contains(&"foo()"));
+    assert!(!labels.contains(&"Main"));
+}
+
+#[test]
+fn completes_call_options_new_includes_salt() {
+    let completions = completions_for_main(
+        r#"
+contract Main {
+    function test() public {
+        Main instance = new Main{ /*caret*/ }();
+    }
+}
+"#,
+    );
+    let labels = completion_labels(&completions);
+
+    assert!(labels.contains(&"salt"));
+}
+
+#[test]
+fn using_brace_context_suppresses_scope_items() {
+    let completions = completions_for_main(
+        r#"
+library Lib {
+    function f(uint256 value) internal {}
+}
+
+contract Main {
+    using {f} for uint256;
+    using { /*caret*/ } for uint256;
+}
+"#,
+    );
+
+    assert!(completions.is_empty());
 }
 
 #[test]
@@ -445,9 +710,46 @@ contract Main {
     let completions = sa_ide_completion::completions(&db, project_id, file_id, offset);
     let foo_count = completions
         .iter()
-        .filter(|item| item.label == "foo")
+        .filter(|item| item.label == "foo()")
         .count();
     assert_eq!(foo_count, 1);
+}
+
+#[test]
+fn completions_include_details_with_prefix_on_parse_errors() {
+    let (text, offset) = extract_offset(
+        r#"
+contract Main {
+    function getData() public pure returns (uint256) {
+        return 1;
+    }
+
+    function greet() public pure returns (string memory) {
+        ge/*caret*/
+    }
+}
+"#,
+    );
+    let files = vec![(NormalizedPath::new("/workspace/src/Main.sol"), text)];
+    let (db, project_id, snapshot) = setup_db(files, vec![]);
+    let file_id = snapshot
+        .file_id(&NormalizedPath::new("/workspace/src/Main.sol"))
+        .expect("file id");
+
+    let completions = sa_ide_completion::completions(&db, project_id, file_id, offset);
+    let get_data = completions
+        .iter()
+        .find(|item| item.label == "getData()")
+        .expect("getData completion");
+
+    assert!(
+        get_data
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("->")),
+        "expected function detail for getData(), got: {:?}",
+        get_data.detail
+    );
 }
 
 #[test]

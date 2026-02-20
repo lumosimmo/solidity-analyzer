@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
 use sa_base_db::FileId;
-use sa_span::{TextRange, TextSize, range_contains};
-use solar::ast::{FunctionKind, ImportItems, ItemKind};
-use solar::interface::Ident;
+use sa_span::{TextRange, TextSize, is_ident_byte, range_contains};
+use sa_syntax::Parse;
+use sa_syntax::ast::{Item, ItemKind, Stmt, StmtKind, TypeKind as AstTypeKind, VariableDefinition};
+use solar::ast::{FunctionKind, ImportItems, ItemKind as SolarItemKind};
+use solar::interface::{Ident, Span};
 use solar::sema::builtins::Member;
 use solar::sema::hir;
 use solar::sema::ty::TyKind;
@@ -18,6 +20,8 @@ use crate::{ResolveOutcome, ResolvedSymbol, ResolvedSymbolKind, SemaSnapshot};
 pub struct SemaCompletionItem {
     pub label: String,
     pub kind: SemaCompletionKind,
+    pub detail: Option<String>,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,25 +45,35 @@ impl SemaSnapshot {
     ) -> Option<Vec<SemaCompletionItem>> {
         let source_id = self.source_id_for_file(file_id)?;
         let items = self.with_gcx(|gcx| {
-            let mut items = Vec::new();
-            let mut seen = HashSet::new();
+            match identifier_completion_context(self, gcx, source_id, offset) {
+                IdentifierCompletionContext::StructLiteralFields { struct_id } => {
+                    struct_field_completion_items(gcx, struct_id)
+                }
+                IdentifierCompletionContext::Scope {
+                    contract_id,
+                    function_id,
+                } => {
+                    let mut items = Vec::new();
+                    let mut seen = HashSet::new();
 
-            collect_source_items(gcx, source_id, &mut items, &mut seen);
-            collect_imported_items(gcx, source_id, &mut items, &mut seen);
+                    collect_source_items(gcx, source_id, &mut items, &mut seen);
+                    collect_imported_items(gcx, source_id, &mut items, &mut seen);
 
-            if let Some(contract_id) = contract_at_offset(self, gcx, source_id, offset) {
-                for item in contract_scope_items(gcx, contract_id) {
-                    push_completion_item(&mut items, &mut seen, item);
+                    if let Some(contract_id) = contract_id {
+                        for item in contract_scope_items(gcx, contract_id) {
+                            push_completion_item(&mut items, &mut seen, item);
+                        }
+                    }
+
+                    if let Some(function_id) = function_id {
+                        for item in local_items_for_function(self, gcx, function_id, offset) {
+                            push_completion_item(&mut items, &mut seen, item);
+                        }
+                    }
+
+                    items
                 }
             }
-
-            if let Some(function_id) = function_at_offset(self, gcx, source_id, offset) {
-                for item in local_items_for_function(self, gcx, function_id, offset) {
-                    push_completion_item(&mut items, &mut seen, item);
-                }
-            }
-
-            items
         });
         Some(items)
     }
@@ -111,8 +125,7 @@ impl SemaSnapshot {
                         let Some(var_id) = variable_id_for_symbol(self, gcx, resolved) else {
                             return Vec::new();
                         };
-                        let ty = gcx.type_of_item(var_id.into());
-                        member_items_for_type(gcx, ty, source_id, current_contract)
+                        member_items_for_variable(self, gcx, source_id, current_contract, var_id)
                     }
                     ResolvedSymbolKind::Struct
                     | ResolvedSymbolKind::Enum
@@ -132,19 +145,37 @@ impl SemaSnapshot {
                 receiver,
             ) {
                 Some(ReceiverResolution::Variable(var_id)) => {
-                    let ty = gcx.type_of_item(var_id.into());
-                    member_items_for_type(gcx, ty, source_id, current_contract)
+                    member_items_for_variable(self, gcx, source_id, current_contract, var_id)
                 }
                 Some(ReceiverResolution::Contract(contract_id)) => {
                     let ty = gcx.type_of_item(contract_id.into()).make_type_type(gcx);
                     member_items_for_type(gcx, ty, source_id, current_contract)
                 }
-                None => Vec::new(),
+                None => member_items_for_unresolved_receiver(
+                    self,
+                    gcx,
+                    source_id,
+                    offset,
+                    receiver,
+                    current_contract,
+                )
+                .unwrap_or_default(),
             }
         });
 
         Some(items)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum IdentifierCompletionContext {
+    StructLiteralFields {
+        struct_id: hir::StructId,
+    },
+    Scope {
+        contract_id: Option<hir::ContractId>,
+        function_id: Option<hir::FunctionId>,
+    },
 }
 
 fn completion_item_for_item(gcx: Gcx<'_>, item_id: hir::ItemId) -> Option<SemaCompletionItem> {
@@ -173,9 +204,19 @@ fn completion_item_for_item(gcx: Gcx<'_>, item_id: hir::ItemId) -> Option<SemaCo
         }
     };
 
+    let detail = match item_id {
+        hir::ItemId::Function(_)
+        | hir::ItemId::Variable(_)
+        | hir::ItemId::Event(_)
+        | hir::ItemId::Error(_) => detail_for_item_id(gcx, item_id),
+        _ => None,
+    };
+
     Some(SemaCompletionItem {
         label: name.to_string(),
         kind,
+        detail,
+        origin: None,
     })
 }
 
@@ -226,7 +267,7 @@ fn collect_imported_items(
     };
 
     for (item_id, item) in ast.items.iter_enumerated() {
-        let ItemKind::Import(import) = &item.kind else {
+        let SolarItemKind::Import(import) = &item.kind else {
             continue;
         };
         let Some(import_source_id) = hir_source
@@ -249,6 +290,8 @@ fn collect_imported_items(
                 let item = SemaCompletionItem {
                     label: alias.as_str().to_string(),
                     kind: SemaCompletionKind::Type,
+                    detail: None,
+                    origin: None,
                 };
                 push_completion_item(items, seen, item);
             }
@@ -303,6 +346,383 @@ fn function_at_offset(
     best.map(|(_, id)| id)
 }
 
+fn identifier_completion_context(
+    snapshot: &SemaSnapshot,
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    offset: TextSize,
+) -> IdentifierCompletionContext {
+    let contract_id = contract_at_offset(snapshot, gcx, source_id, offset);
+    let function_id = function_at_offset(snapshot, gcx, source_id, offset);
+    if let Some(function_id) = function_id {
+        let func = gcx.hir.function(function_id);
+        if let Some(body) = func.body {
+            let mut finder = IdentifierCompletionContextFinder {
+                snapshot,
+                gcx,
+                source_id,
+                offset,
+                context: None,
+            };
+            if let Some(context) = finder.find_in_body(&body) {
+                return context;
+            }
+        }
+    }
+    IdentifierCompletionContext::Scope {
+        contract_id,
+        function_id,
+    }
+}
+
+fn struct_field_completion_items(
+    gcx: Gcx<'_>,
+    struct_id: hir::StructId,
+) -> Vec<SemaCompletionItem> {
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    let strukt = gcx.hir.strukt(struct_id);
+    for &field_id in strukt.fields {
+        let var = gcx.hir.variable(field_id);
+        let Some(name) = var.name else {
+            continue;
+        };
+        let item = SemaCompletionItem {
+            label: name.as_str().to_string(),
+            kind: SemaCompletionKind::Variable,
+            detail: None,
+            origin: None,
+        };
+        push_completion_item(&mut items, &mut seen, item);
+    }
+    items
+}
+
+struct IdentifierCompletionContextFinder<'a, 'gcx> {
+    snapshot: &'a SemaSnapshot,
+    gcx: Gcx<'gcx>,
+    source_id: hir::SourceId,
+    offset: TextSize,
+    context: Option<IdentifierCompletionContext>,
+}
+
+impl<'a, 'gcx> IdentifierCompletionContextFinder<'a, 'gcx> {
+    fn find_in_body(&mut self, body: &hir::Block<'gcx>) -> Option<IdentifierCompletionContext> {
+        for stmt in body.stmts {
+            self.visit_stmt(stmt);
+            if self.context.is_some() {
+                break;
+            }
+        }
+        self.context
+    }
+
+    fn visit_stmt(&mut self, stmt: &hir::Stmt<'gcx>) {
+        if self.context.is_some() {
+            return;
+        }
+        match &stmt.kind {
+            hir::StmtKind::DeclSingle(var_id) => {
+                let var = self.gcx.hir.variable(*var_id);
+                self.visit_variable(var);
+            }
+            hir::StmtKind::DeclMulti(vars, expr) => {
+                for var in vars.iter().flatten() {
+                    let var = self.gcx.hir.variable(*var);
+                    self.visit_variable(var);
+                }
+                self.visit_expr(expr);
+            }
+            hir::StmtKind::Block(block)
+            | hir::StmtKind::UncheckedBlock(block)
+            | hir::StmtKind::Loop(block, _) => {
+                for stmt in block.stmts {
+                    self.visit_stmt(stmt);
+                }
+            }
+            hir::StmtKind::Emit(expr) | hir::StmtKind::Revert(expr) => {
+                self.visit_expr(expr);
+            }
+            hir::StmtKind::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.visit_expr(expr);
+                }
+            }
+            hir::StmtKind::Break
+            | hir::StmtKind::Continue
+            | hir::StmtKind::Placeholder
+            | hir::StmtKind::Err(_) => {}
+            hir::StmtKind::If(cond, then_branch, else_branch) => {
+                self.visit_expr(cond);
+                self.visit_stmt(then_branch);
+                if let Some(else_branch) = else_branch {
+                    self.visit_stmt(else_branch);
+                }
+            }
+            hir::StmtKind::Try(stmt_try) => {
+                self.visit_expr(&stmt_try.expr);
+                for clause in stmt_try.clauses {
+                    for &arg in clause.args {
+                        let var = self.gcx.hir.variable(arg);
+                        self.visit_variable(var);
+                    }
+                    for stmt in clause.block.stmts {
+                        self.visit_stmt(stmt);
+                    }
+                }
+            }
+            hir::StmtKind::Expr(expr) => self.visit_expr(expr),
+        }
+    }
+
+    fn visit_variable(&mut self, var: &hir::Variable<'gcx>) {
+        if self.context.is_some() {
+            return;
+        }
+        if let Some(expr) = var.initializer {
+            self.visit_expr(expr);
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &hir::Expr<'gcx>) {
+        if self.context.is_some() {
+            return;
+        }
+        if let hir::ExprKind::Call(callee, args, _) = &expr.kind
+            && self.handle_named_arg_context(callee, args)
+        {
+            return;
+        }
+        let in_expr = self
+            .snapshot
+            .span_to_text_range(expr.span)
+            .map(|range| range_contains(range, self.offset))
+            .unwrap_or(true);
+        if !in_expr {
+            return;
+        }
+
+        match &expr.kind {
+            hir::ExprKind::Call(callee, args, opts) => {
+                self.visit_expr(callee);
+                if let Some(opts) = opts {
+                    for opt in *opts {
+                        self.visit_expr(&opt.value);
+                    }
+                }
+                for expr in args.kind.exprs() {
+                    self.visit_expr(expr);
+                }
+            }
+            hir::ExprKind::Ident(_) | hir::ExprKind::Lit(_) | hir::ExprKind::Err(_) => {}
+            hir::ExprKind::Member(base, _) => self.visit_expr(base),
+            hir::ExprKind::Array(exprs) => {
+                for expr in exprs.iter() {
+                    self.visit_expr(expr);
+                }
+            }
+            hir::ExprKind::Assign(lhs, _, rhs) | hir::ExprKind::Binary(lhs, _, rhs) => {
+                self.visit_expr(lhs);
+                self.visit_expr(rhs);
+            }
+            hir::ExprKind::Delete(expr)
+            | hir::ExprKind::Payable(expr)
+            | hir::ExprKind::Unary(_, expr) => self.visit_expr(expr),
+            hir::ExprKind::Index(expr, index) => {
+                self.visit_expr(expr);
+                if let Some(index) = index {
+                    self.visit_expr(index);
+                }
+            }
+            hir::ExprKind::Slice(expr, start, end) => {
+                self.visit_expr(expr);
+                if let Some(start) = start {
+                    self.visit_expr(start);
+                }
+                if let Some(end) = end {
+                    self.visit_expr(end);
+                }
+            }
+            hir::ExprKind::Ternary(cond, then_branch, else_branch) => {
+                self.visit_expr(cond);
+                self.visit_expr(then_branch);
+                self.visit_expr(else_branch);
+            }
+            hir::ExprKind::Tuple(exprs) => {
+                for expr in exprs.iter().copied().flatten() {
+                    self.visit_expr(expr);
+                }
+            }
+            hir::ExprKind::New(ty) | hir::ExprKind::TypeCall(ty) | hir::ExprKind::Type(ty) => {
+                self.visit_type(ty);
+            }
+        }
+    }
+
+    fn handle_named_arg_context(
+        &mut self,
+        callee: &hir::Expr<'gcx>,
+        args: &hir::CallArgs<'gcx>,
+    ) -> bool {
+        let Some(struct_id) = self.struct_id_for_callee(callee) else {
+            return false;
+        };
+        if let hir::CallArgsKind::Named(named_args) = args.kind {
+            for named_arg in named_args {
+                if let Some(range) = self.snapshot.span_to_text_range(named_arg.name.span)
+                    && (range_contains(range, self.offset) || range.end() == self.offset)
+                {
+                    self.context =
+                        Some(IdentifierCompletionContext::StructLiteralFields { struct_id });
+                    return true;
+                }
+            }
+        }
+
+        if self.struct_literal_name_position(args) {
+            self.context = Some(IdentifierCompletionContext::StructLiteralFields { struct_id });
+            return true;
+        }
+        false
+    }
+
+    fn struct_literal_name_position(&self, args: &hir::CallArgs<'gcx>) -> bool {
+        let Some(range) = self.snapshot.span_to_text_range(args.span) else {
+            return false;
+        };
+        if !(range_contains(range, self.offset) || range.end() == self.offset) {
+            return false;
+        }
+        let source = self.gcx.hir.source(self.source_id);
+        let text = source.file.src.as_str();
+        let bytes = text.as_bytes();
+        let start = usize::from(range.start());
+        let mut idx = usize::from(self.offset);
+        if idx == 0 || idx > bytes.len() || bytes.is_empty() {
+            return false;
+        }
+        idx = idx.saturating_sub(1);
+        if idx >= bytes.len() {
+            idx = bytes.len().saturating_sub(1);
+        }
+
+        let mut i = idx;
+        loop {
+            if i < start {
+                break;
+            }
+            let b = bytes[i];
+            if b == b':' {
+                return false;
+            }
+            if b == b',' || b == b'{' {
+                return true;
+            }
+            if is_ident_byte(b) || b.is_ascii_whitespace() {
+                if i == 0 {
+                    break;
+                }
+                i -= 1;
+                continue;
+            }
+            return false;
+        }
+        false
+    }
+
+    fn visit_type(&mut self, ty: &hir::Type<'gcx>) {
+        if self.context.is_some() {
+            return;
+        }
+        match &ty.kind {
+            hir::TypeKind::Array(array) => {
+                self.visit_type(&array.element);
+                if let Some(expr) = array.size {
+                    self.visit_expr(expr);
+                }
+            }
+            hir::TypeKind::Function(func) => {
+                for &param in func.parameters {
+                    let var = self.gcx.hir.variable(param);
+                    self.visit_variable(var);
+                }
+                for &ret in func.returns {
+                    let var = self.gcx.hir.variable(ret);
+                    self.visit_variable(var);
+                }
+            }
+            hir::TypeKind::Mapping(mapping) => {
+                self.visit_type(&mapping.key);
+                self.visit_type(&mapping.value);
+            }
+            _ => {}
+        }
+    }
+
+    fn struct_id_for_callee(&self, callee: &hir::Expr<'gcx>) -> Option<hir::StructId> {
+        match &callee.kind {
+            hir::ExprKind::Ident(res) => self.struct_id_from_res(res),
+            hir::ExprKind::Type(ty) | hir::ExprKind::TypeCall(ty) => match ty.kind {
+                hir::TypeKind::Custom(hir::ItemId::Struct(id)) => Some(id),
+                _ => None,
+            },
+            hir::ExprKind::Member(base, ident) => self.struct_id_from_member(base, ident),
+            _ => None,
+        }
+    }
+
+    fn struct_id_from_member(
+        &self,
+        base: &hir::Expr<'gcx>,
+        ident: &solar::interface::Ident,
+    ) -> Option<hir::StructId> {
+        let hir::ExprKind::Ident(res) = &base.kind else {
+            return None;
+        };
+        let mut contract_id = None;
+        for res in res.iter() {
+            if let hir::Res::Item(hir::ItemId::Contract(id)) = res {
+                if contract_id.is_some() {
+                    return None;
+                }
+                contract_id = Some(*id);
+            }
+        }
+        let contract_id = contract_id?;
+        let contract = self.gcx.hir.contract(contract_id);
+        let mut found = None;
+        for &item_id in contract.items {
+            let hir::ItemId::Struct(struct_id) = item_id else {
+                continue;
+            };
+            let Some(name) = self.gcx.item_name_opt(item_id) else {
+                continue;
+            };
+            if name.name != ident.name {
+                continue;
+            }
+            if found.is_some() {
+                return None;
+            }
+            found = Some(struct_id);
+        }
+        found
+    }
+
+    fn struct_id_from_res(&self, res: &[hir::Res]) -> Option<hir::StructId> {
+        let mut found = None;
+        for res in res {
+            if let hir::Res::Item(hir::ItemId::Struct(id)) = res {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(*id);
+            }
+        }
+        found
+    }
+}
+
 enum ReceiverResolution {
     Variable(hir::VariableId),
     Contract(hir::ContractId),
@@ -325,7 +745,323 @@ fn resolve_receiver_by_name(
     {
         return Some(ReceiverResolution::Variable(var_id));
     }
+    if let Some(resolution) = resolve_import_alias_receiver(gcx, source_id, receiver) {
+        return Some(resolution);
+    }
     find_contract_by_name(gcx, source_id, receiver).map(ReceiverResolution::Contract)
+}
+
+fn resolve_import_alias_receiver(
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    receiver: &str,
+) -> Option<ReceiverResolution> {
+    let item_id = resolve_import_alias_item(gcx, source_id, receiver)?;
+    match item_id {
+        hir::ItemId::Contract(contract_id) => Some(ReceiverResolution::Contract(contract_id)),
+        _ => None,
+    }
+}
+
+fn resolve_import_alias_item(
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    alias_name: &str,
+) -> Option<hir::ItemId> {
+    let source = gcx.sources.get(source_id)?;
+    let ast = source.ast.as_ref()?;
+    let hir_source = gcx.hir.source(source_id);
+    let mut resolved = None;
+
+    for (item_id, item) in ast.items.iter_enumerated() {
+        let SolarItemKind::Import(import) = &item.kind else {
+            continue;
+        };
+        let Some(import_source_id) = hir_source
+            .imports
+            .iter()
+            .find_map(|(import_id, source_id)| (*import_id == item_id).then_some(*source_id))
+        else {
+            continue;
+        };
+
+        let ImportItems::Aliases(aliases) = &import.items else {
+            continue;
+        };
+        for (original, alias) in aliases.iter() {
+            let alias_ident = alias.as_ref().unwrap_or(original);
+            if alias_ident.as_str() != alias_name {
+                continue;
+            }
+            let Some(item_id) = exports::find_exported_item(gcx, import_source_id, original.name)
+            else {
+                continue;
+            };
+            if resolved.is_some() {
+                return None;
+            }
+            resolved = Some(item_id);
+        }
+    }
+
+    resolved
+}
+
+fn member_items_for_variable(
+    snapshot: &SemaSnapshot,
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    contract_id: Option<hir::ContractId>,
+    var_id: hir::VariableId,
+) -> Vec<SemaCompletionItem> {
+    let ty = gcx.type_of_item(var_id.into());
+    let items = member_items_for_type(gcx, ty, source_id, contract_id);
+    if !items.is_empty() {
+        return items;
+    }
+    if matches!(ty.kind, TyKind::Err(_))
+        && let Some(items) =
+            member_items_for_variable_alias(snapshot, gcx, source_id, contract_id, var_id)
+    {
+        return items;
+    }
+    items
+}
+
+fn member_items_for_variable_alias(
+    snapshot: &SemaSnapshot,
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    contract_id: Option<hir::ContractId>,
+    var_id: hir::VariableId,
+) -> Option<Vec<SemaCompletionItem>> {
+    let var = gcx.hir.variable(var_id);
+    let hir::TypeKind::Custom(_) = var.ty.kind else {
+        return None;
+    };
+    let alias_name = type_name_from_span(snapshot, gcx, source_id, var.ty.span)?;
+    let item_id = resolve_import_alias_item(gcx, source_id, alias_name.as_str())?;
+    let hir::ItemId::Contract(_) = item_id else {
+        return None;
+    };
+    let ty = gcx.type_of_item(item_id);
+    Some(member_items_for_type(gcx, ty, source_id, contract_id))
+}
+
+fn type_name_from_span(
+    snapshot: &SemaSnapshot,
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    span: Span,
+) -> Option<String> {
+    let range = snapshot.span_to_text_range(span)?;
+    let source = gcx.hir.source(source_id);
+    let start = usize::from(range.start());
+    let end = usize::from(range.end());
+    let snippet = source.file.src.get(start..end)?.trim();
+    if snippet.is_empty() || snippet.contains('.') {
+        return None;
+    }
+    Some(snippet.to_string())
+}
+
+fn member_items_for_unresolved_receiver(
+    _snapshot: &SemaSnapshot,
+    gcx: Gcx<'_>,
+    source_id: hir::SourceId,
+    offset: TextSize,
+    receiver: &str,
+    contract_id: Option<hir::ContractId>,
+) -> Option<Vec<SemaCompletionItem>> {
+    let source = gcx.hir.source(source_id);
+    let parse = sa_syntax::parse_file(source.file.src.as_str());
+    let var = find_local_var_definition(&parse, offset, receiver)?;
+    let type_ident = match &var.ty.kind {
+        AstTypeKind::Custom(path) => path.get_ident(),
+        _ => None,
+    }?;
+    let item_id = exports::find_exported_item(gcx, source_id, type_ident.name).or_else(|| {
+        find_contract_by_name(gcx, source_id, type_ident.as_str()).map(hir::ItemId::Contract)
+    })?;
+    let ty = gcx.type_of_item(item_id);
+    let items = member_items_for_type(gcx, ty, source_id, contract_id);
+    (!items.is_empty()).then_some(items)
+}
+
+fn find_local_var_definition<'a>(
+    parse: &'a Parse,
+    offset: TextSize,
+    receiver: &str,
+) -> Option<&'a VariableDefinition<'static>> {
+    let mut best: Option<(TextRange, &VariableDefinition<'static>)> = None;
+    for item in parse.tree().items.iter() {
+        find_local_var_in_item(parse, item, offset, receiver, &mut best);
+    }
+    best.map(|(_, var)| var)
+}
+
+fn find_local_var_in_item<'a>(
+    parse: &'a Parse,
+    item: &'a Item<'static>,
+    offset: TextSize,
+    receiver: &str,
+    best: &mut Option<(TextRange, &'a VariableDefinition<'static>)>,
+) {
+    let Some(item_range) = parse.span_to_text_range(item.span) else {
+        return;
+    };
+    if !range_contains(item_range, offset) {
+        return;
+    }
+    match &item.kind {
+        ItemKind::Contract(contract) => {
+            for item in contract.body.iter() {
+                find_local_var_in_item(parse, item, offset, receiver, best);
+            }
+        }
+        ItemKind::Function(function) => {
+            let Some(body) = function.body.as_ref() else {
+                return;
+            };
+            let Some(body_range) = parse.span_to_text_range(function.body_span) else {
+                return;
+            };
+            if !range_contains(body_range, offset) {
+                return;
+            }
+            for param in function.header.parameters.vars.iter() {
+                consider_local_var(parse, param, receiver, offset, body_range, best);
+            }
+            if let Some(returns) = function.header.returns.as_ref() {
+                for param in returns.vars.iter() {
+                    consider_local_var(parse, param, receiver, offset, body_range, best);
+                }
+            }
+            find_local_var_in_block(parse, body, offset, receiver, best);
+        }
+        _ => {}
+    }
+}
+
+fn find_local_var_in_block<'a>(
+    parse: &'a Parse,
+    block: &'a sa_syntax::ast::Block<'static>,
+    offset: TextSize,
+    receiver: &str,
+    best: &mut Option<(TextRange, &'a VariableDefinition<'static>)>,
+) {
+    let Some(block_range) = parse.span_to_text_range(block.span) else {
+        return;
+    };
+    if !range_contains(block_range, offset) {
+        return;
+    }
+    for stmt in block.stmts.iter() {
+        find_local_var_in_stmt(parse, stmt, offset, receiver, block_range, best);
+    }
+}
+
+fn find_local_var_in_stmt<'a>(
+    parse: &'a Parse,
+    stmt: &'a Stmt<'static>,
+    offset: TextSize,
+    receiver: &str,
+    scope: TextRange,
+    best: &mut Option<(TextRange, &'a VariableDefinition<'static>)>,
+) {
+    match &stmt.kind {
+        StmtKind::DeclSingle(var) => {
+            consider_local_var(parse, var, receiver, offset, scope, best);
+        }
+        StmtKind::DeclMulti(vars, _) => {
+            for var in vars.iter() {
+                if let sa_syntax::ast::interface::SpannedOption::Some(var) = var {
+                    consider_local_var(parse, var, receiver, offset, scope, best);
+                }
+            }
+        }
+        StmtKind::Block(block) | StmtKind::UncheckedBlock(block) => {
+            find_local_var_in_block(parse, block, offset, receiver, best);
+        }
+        StmtKind::For { init, body, .. } => {
+            let Some(body_range) = parse.span_to_text_range(body.span) else {
+                return;
+            };
+            if !range_contains(body_range, offset) {
+                return;
+            }
+            if let Some(init) = init.as_deref() {
+                find_local_var_in_stmt(parse, init, offset, receiver, body_range, best);
+            }
+            find_local_var_in_stmt(parse, body, offset, receiver, body_range, best);
+        }
+        StmtKind::If(_, then_branch, else_branch) => {
+            if let Some(then_range) = parse.span_to_text_range(then_branch.span)
+                && range_contains(then_range, offset)
+            {
+                find_local_var_in_stmt(parse, then_branch, offset, receiver, then_range, best);
+            }
+            if let Some(else_branch) = else_branch.as_deref()
+                && let Some(else_range) = parse.span_to_text_range(else_branch.span)
+                && range_contains(else_range, offset)
+            {
+                find_local_var_in_stmt(parse, else_branch, offset, receiver, else_range, best);
+            }
+        }
+        StmtKind::While(_, body) | StmtKind::DoWhile(body, _) => {
+            let Some(body_range) = parse.span_to_text_range(body.span) else {
+                return;
+            };
+            if !range_contains(body_range, offset) {
+                return;
+            }
+            find_local_var_in_stmt(parse, body, offset, receiver, body_range, best);
+        }
+        StmtKind::Try(stmt_try) => {
+            for clause in stmt_try.clauses.iter() {
+                let Some(clause_range) = parse.span_to_text_range(clause.span) else {
+                    continue;
+                };
+                if !range_contains(clause_range, offset) {
+                    continue;
+                }
+                for param in clause.args.vars.iter() {
+                    consider_local_var(parse, param, receiver, offset, clause_range, best);
+                }
+                find_local_var_in_block(parse, &clause.block, offset, receiver, best);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn consider_local_var<'a>(
+    parse: &'a Parse,
+    var: &'a VariableDefinition<'static>,
+    receiver: &str,
+    offset: TextSize,
+    scope: TextRange,
+    best: &mut Option<(TextRange, &'a VariableDefinition<'static>)>,
+) {
+    let Some(name) = var.name else {
+        return;
+    };
+    if name.as_str() != receiver {
+        return;
+    }
+    let Some(range) = parse.span_to_text_range(name.span) else {
+        return;
+    };
+    if range.start() > offset || !range_contains(scope, offset) {
+        return;
+    }
+    let replace = best
+        .as_ref()
+        .map(|(best_scope, _)| scope.len() < best_scope.len())
+        .unwrap_or(true);
+    if replace {
+        *best = Some((scope, var));
+    }
 }
 
 fn find_variable_in_function(
@@ -470,7 +1206,238 @@ fn contract_at_offset(
             best = Some((range, contract_id));
         }
     }
-    best.map(|(_, id)| id)
+    if let Some((_, id)) = best {
+        return Some(id);
+    }
+
+    let source = gcx.hir.source(source_id);
+    let name = contract_name_at_offset_fallback(source.file.src.as_str(), offset)?;
+    gcx.hir.contract_ids().find(|id| {
+        let contract = gcx.hir.contract(*id);
+        contract.source == source_id && contract.name.as_str() == name
+    })
+}
+
+fn contract_name_at_offset_fallback(text: &str, offset: TextSize) -> Option<String> {
+    let offset = usize::from(offset).min(text.len());
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut scanner = FallbackScanner::new(text);
+    let mut brace_depth = 0usize;
+
+    while let Some(token) = scanner.next_token() {
+        match token.kind {
+            FallbackTokenKind::Punct('{') => brace_depth += 1,
+            FallbackTokenKind::Punct('}') => brace_depth = brace_depth.saturating_sub(1),
+            FallbackTokenKind::Ident(ref ident)
+                if brace_depth == 0 && is_contract_keyword(ident) =>
+            {
+                if let Some(decl) = parse_contract_decl(&mut scanner, text, token.start) {
+                    brace_depth = 0;
+                    if offset >= decl.start && offset <= decl.close_brace {
+                        return Some(decl.name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn is_contract_keyword(ident: &str) -> bool {
+    matches!(ident, "contract" | "library" | "interface")
+}
+
+struct ContractDecl {
+    start: usize,
+    close_brace: usize,
+    name: String,
+}
+
+fn parse_contract_decl(
+    scanner: &mut FallbackScanner<'_>,
+    text: &str,
+    contract_start: usize,
+) -> Option<ContractDecl> {
+    let name_token = scanner.next_token()?;
+    let name = match name_token.kind {
+        FallbackTokenKind::Ident(ident) => ident,
+        _ => return None,
+    };
+
+    let mut open_brace: Option<usize> = None;
+    while let Some(token) = scanner.next_token() {
+        if let FallbackTokenKind::Punct('{') = token.kind {
+            open_brace = Some(token.start);
+            break;
+        }
+    }
+    let open_brace = open_brace?;
+    let close_brace = matching_close_brace(text, open_brace).unwrap_or(text.len());
+    scanner.idx = close_brace.saturating_add(1);
+
+    Some(ContractDecl {
+        start: contract_start,
+        close_brace,
+        name,
+    })
+}
+
+fn matching_close_brace(text: &str, open_brace: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if open_brace >= bytes.len() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut i = open_brace.saturating_add(1);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'/' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            if next == b'/' {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if next == b'*' {
+                i += 2;
+                while i + 1 < bytes.len() {
+                    if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if b == b'\'' || b == b'"' {
+            i = skip_string(bytes, i);
+            continue;
+        }
+        if b == b'{' {
+            depth += 1;
+        } else if b == b'}' {
+            if depth == 0 {
+                return Some(i);
+            }
+            depth = depth.saturating_sub(1);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn skip_string(bytes: &[u8], start: usize) -> usize {
+    let quote = bytes[start];
+    let mut i = start.saturating_add(1);
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\\' {
+            i = i.saturating_add(2);
+            continue;
+        }
+        if b == quote {
+            return i.saturating_add(1);
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+struct FallbackScanner<'a> {
+    bytes: &'a [u8],
+    idx: usize,
+}
+
+struct FallbackToken {
+    kind: FallbackTokenKind,
+    start: usize,
+}
+
+enum FallbackTokenKind {
+    Ident(String),
+    Punct(char),
+}
+
+impl<'a> FallbackScanner<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            bytes: text.as_bytes(),
+            idx: 0,
+        }
+    }
+
+    fn next_token(&mut self) -> Option<FallbackToken> {
+        self.skip_trivia();
+        if self.idx >= self.bytes.len() {
+            return None;
+        }
+        let start = self.idx;
+        let b = self.bytes[self.idx];
+        if is_ident_byte(b) {
+            self.idx += 1;
+            while self.idx < self.bytes.len() && is_ident_byte(self.bytes[self.idx]) {
+                self.idx += 1;
+            }
+            let ident = std::str::from_utf8(&self.bytes[start..self.idx])
+                .ok()?
+                .to_string();
+            Some(FallbackToken {
+                kind: FallbackTokenKind::Ident(ident),
+                start,
+            })
+        } else {
+            self.idx += 1;
+            Some(FallbackToken {
+                kind: FallbackTokenKind::Punct(b as char),
+                start,
+            })
+        }
+    }
+
+    fn skip_trivia(&mut self) {
+        while self.idx < self.bytes.len() {
+            let b = self.bytes[self.idx];
+            if b.is_ascii_whitespace() {
+                self.idx += 1;
+                continue;
+            }
+            if b == b'/' && self.idx + 1 < self.bytes.len() {
+                let next = self.bytes[self.idx + 1];
+                if next == b'/' {
+                    self.idx += 2;
+                    while self.idx < self.bytes.len() && self.bytes[self.idx] != b'\n' {
+                        self.idx += 1;
+                    }
+                    continue;
+                }
+                if next == b'*' {
+                    self.idx += 2;
+                    while self.idx + 1 < self.bytes.len() {
+                        if self.bytes[self.idx] == b'*' && self.bytes[self.idx + 1] == b'/' {
+                            self.idx += 2;
+                            break;
+                        }
+                        self.idx += 1;
+                    }
+                    continue;
+                }
+            }
+            if b == b'\'' || b == b'"' {
+                self.idx = skip_string(self.bytes, self.idx);
+                continue;
+            }
+            break;
+        }
+    }
 }
 
 fn contract_scope_items(gcx: Gcx<'_>, contract_id: hir::ContractId) -> Vec<SemaCompletionItem> {
@@ -596,6 +1563,8 @@ fn push_variable_item(gcx: Gcx<'_>, var_id: hir::VariableId, items: &mut Vec<Sem
     items.push(SemaCompletionItem {
         label: name.to_string(),
         kind: SemaCompletionKind::Variable,
+        detail: None,
+        origin: None,
     });
 }
 
@@ -638,6 +1607,8 @@ fn super_member_items(gcx: Gcx<'_>, contract_id: hir::ContractId) -> Vec<SemaCom
             items.push(SemaCompletionItem {
                 label: gcx.item_name(function_id).to_string(),
                 kind: SemaCompletionKind::Function,
+                detail: detail_for_item_id(gcx, item_id),
+                origin: Some(base.name.as_str().to_string()),
             });
         }
     }
@@ -651,46 +1622,75 @@ fn member_items_for_type<'gcx>(
     contract_id: Option<hir::ContractId>,
 ) -> Vec<SemaCompletionItem> {
     let ty = default_memory_if_ref(gcx, ty);
+    let receiver_contract = receiver_contract_id(ty);
     if let Some(target_contract_id) = contract_id_from_type(ty) {
         let base_accessible = contract_id
             .is_some_and(|current| contract_is_base_of(gcx, current, target_contract_id));
-        return contract_type_items(gcx, target_contract_id, base_accessible);
+        return contract_type_items(
+            gcx,
+            target_contract_id,
+            base_accessible,
+            Some(target_contract_id),
+        );
     }
 
-    completion_items_from_members(gcx, gcx.members_of(ty, source_id, contract_id))
+    completion_items_from_members(
+        gcx,
+        gcx.members_of(ty, source_id, contract_id),
+        receiver_contract,
+    )
 }
 
 fn completion_items_from_members<'gcx>(
     gcx: Gcx<'gcx>,
     members: &[Member<'gcx>],
+    current_contract: Option<hir::ContractId>,
 ) -> Vec<SemaCompletionItem> {
     let mut items = Vec::with_capacity(members.len());
     for member in members {
         let mut label = member.name.to_string();
-        let kind = match member.res {
+        let (kind, detail) = match member.res {
             Some(hir::Res::Item(hir::ItemId::Function(function_id))) => {
                 let func = gcx.hir.function(function_id);
                 if let Some(var_id) = func.gettee {
                     if let Some(name) = gcx.hir.variable(var_id).name {
                         label = name.to_string();
                     }
-                    SemaCompletionKind::Variable
+                    (
+                        SemaCompletionKind::Variable,
+                        detail_for_item_id(gcx, hir::ItemId::Variable(var_id)),
+                    )
                 } else {
-                    SemaCompletionKind::Function
+                    (
+                        SemaCompletionKind::Function,
+                        detail_for_item_id(gcx, hir::ItemId::Function(function_id)),
+                    )
                 }
             }
             Some(hir::Res::Item(hir::ItemId::Variable(var_id))) => {
                 if let Some(name) = gcx.hir.variable(var_id).name {
                     label = name.to_string();
                 }
-                SemaCompletionKind::Variable
+                (
+                    SemaCompletionKind::Variable,
+                    detail_for_item_id(gcx, hir::ItemId::Variable(var_id)),
+                )
             }
             _ => match member.ty.kind {
-                TyKind::FnPtr(_) => SemaCompletionKind::Function,
-                _ => SemaCompletionKind::Variable,
+                TyKind::FnPtr(_) => (SemaCompletionKind::Function, detail_for_ty(gcx, member.ty)),
+                _ => (SemaCompletionKind::Variable, detail_for_ty(gcx, member.ty)),
             },
         };
-        items.push(SemaCompletionItem { label, kind });
+        let origin = match member.res {
+            Some(hir::Res::Item(item_id)) => origin_for_item_id(gcx, item_id, current_contract),
+            _ => Some("builtin".to_string()),
+        };
+        items.push(SemaCompletionItem {
+            label,
+            kind,
+            detail,
+            origin,
+        });
     }
     items
 }
@@ -699,6 +1699,7 @@ fn contract_type_items(
     gcx: Gcx<'_>,
     contract_id: hir::ContractId,
     base_accessible: bool,
+    receiver_contract: Option<hir::ContractId>,
 ) -> Vec<SemaCompletionItem> {
     contract_type_members(
         gcx,
@@ -712,12 +1713,76 @@ fn contract_type_items(
             TyKind::FnPtr(_) => SemaCompletionKind::Function,
             _ => SemaCompletionKind::Variable,
         };
+        let detail = detail_for_item_id(gcx, member.item_id);
+        let origin = origin_for_item_id(gcx, member.item_id, receiver_contract);
         SemaCompletionItem {
             label: member.name.to_string(),
             kind,
+            detail,
+            origin,
         }
     })
     .collect()
+}
+
+fn detail_for_item_id(gcx: Gcx<'_>, item_id: hir::ItemId) -> Option<String> {
+    let ty = gcx.type_of_item(item_id);
+    detail_for_ty(gcx, ty)
+}
+
+fn detail_for_ty<'gcx>(gcx: Gcx<'gcx>, ty: Ty<'gcx>) -> Option<String> {
+    match ty.kind {
+        TyKind::FnPtr(_) => {
+            let params = ty.parameters().unwrap_or_default();
+            let returns = ty.returns().unwrap_or_default();
+            Some(format_signature(gcx, params, returns))
+        }
+        TyKind::Event(tys, _) | TyKind::Error(tys, _) => Some(format_params(gcx, tys)),
+        _ => Some(ty.display(gcx).to_string()),
+    }
+}
+
+fn format_signature<'gcx>(gcx: Gcx<'gcx>, params: &[Ty<'gcx>], returns: &[Ty<'gcx>]) -> String {
+    format!(
+        "({}) -> ({})",
+        format_type_list(gcx, params),
+        format_type_list(gcx, returns)
+    )
+}
+
+fn format_params<'gcx>(gcx: Gcx<'gcx>, params: &[Ty<'gcx>]) -> String {
+    format!("({})", format_type_list(gcx, params))
+}
+
+fn format_type_list<'gcx>(gcx: Gcx<'gcx>, tys: &[Ty<'gcx>]) -> String {
+    tys.iter()
+        .map(|ty| ty.display(gcx).to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn origin_for_item_id(
+    gcx: Gcx<'_>,
+    item_id: hir::ItemId,
+    receiver_contract: Option<hir::ContractId>,
+) -> Option<String> {
+    let item = gcx.hir.item(item_id);
+    let contract_id = item.contract()?;
+    if receiver_contract.is_some_and(|current| current == contract_id) {
+        return None;
+    }
+    Some(gcx.hir.contract(contract_id).name.as_str().to_string())
+}
+
+fn receiver_contract_id(ty: Ty<'_>) -> Option<hir::ContractId> {
+    match ty.kind {
+        TyKind::Contract(contract_id) => Some(contract_id),
+        TyKind::Type(inner) => match inner.kind {
+            TyKind::Contract(contract_id) => Some(contract_id),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn contract_is_base_of(

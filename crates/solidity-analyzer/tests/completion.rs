@@ -195,5 +195,5 @@ contract Main {
         CompletionResponse::List(list) => list.items,
     };
 
-    assert!(items.iter().any(|item| item.label == "ping"));
+    assert!(items.iter().any(|item| item.label == "ping()"));
 }
