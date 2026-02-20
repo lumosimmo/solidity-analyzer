@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag that already has VSIX assets (for example v0.1.1)
+        description: Release tag that already has VSIX assets
         required: true
         type: string
       publish_vscode:
