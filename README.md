@@ -1,10 +1,12 @@
 # solidity-analyzer
 
+![Open VSX Version](https://img.shields.io/open-vsx/v/lumosimmo/solidity-analyzer)
+
 solidity-analyzer is a Solidity language server implementation with first-class [Foundry](https://github.com/foundry-rs/foundry) support. A VS Code extension is provided for easy setup, while you can use it with any editor that supports the Language Server Protocol (LSP).
 
 The architecture of solidity-analyzer is structured as a set of libraries for analyzing Solidity code. It's heavily inspired by [rust-analyzer](https://rust-analyzer.github.io/), the popular Rust language server.
 
-## ‼️ This extension is currently not published on the VS Code Marketplace. Any published version on the Marketplace is a scam.
+## ‼️ This extension is currently only published on Open VSX, NOT the VS Code Marketplace. If you find a published version on the VS Code Marketplace, it is a scam.
 
 ## Features
 
