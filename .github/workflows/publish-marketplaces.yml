@@ -1,0 +1,95 @@
+name: Publish Extension Marketplaces
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag that already has VSIX assets (for example v0.1.1)
+        required: true
+        type: string
+      publish_vscode:
+        description: Publish to VS Code Marketplace
+        required: true
+        type: boolean
+        default: true
+      publish_open_vsx:
+        description: Publish to Open VSX
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate targets
+        run: |
+          if [ "${{ inputs.publish_vscode }}" != "true" ] && [ "${{ inputs.publish_open_vsx }}" != "true" ]; then
+            echo "At least one target must be enabled."
+            exit 1
+          fi
+
+      - name: Download VSIX assets from GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ inputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "*.vsix" \
+            --dir dist
+
+      - name: Verify VSIX assets
+        run: ls -1 dist/*.vsix
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install vsce
+        if: ${{ inputs.publish_vscode }}
+        run: npm install -g @vscode/vsce
+
+      - name: Validate VS Code Marketplace token
+        if: ${{ inputs.publish_vscode }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "${VSCE_PAT}" ]; then
+            echo "Missing VSCE_PAT secret."
+            exit 1
+          fi
+
+      - name: Publish VS Code Marketplace packages
+        if: ${{ inputs.publish_vscode }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for vsix in dist/*.vsix; do
+            echo "Publishing ${vsix}"
+            vsce publish --packagePath "${vsix}"
+          done
+
+      - name: Validate Open VSX token
+        if: ${{ inputs.publish_open_vsx }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "${OVSX_PAT}" ]; then
+            echo "Missing OVSX_PAT secret."
+            exit 1
+          fi
+
+      - name: Publish Open VSX packages
+        if: ${{ inputs.publish_open_vsx }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          for vsix in dist/*.vsix; do
+            echo "Publishing ${vsix}"
+            npx --yes ovsx publish "${vsix}" -p "${OVSX_PAT}"
+          done
