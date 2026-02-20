@@ -1,0 +1,78 @@
+name: Rust Job
+description: Run a Rust CI command with optional toolchain components and caching.
+
+inputs:
+  command:
+    description: Command to run.
+    required: true
+  rustflags:
+    description: RUSTFLAGS to apply (empty string to disable).
+    required: false
+    default: -C link-arg=-fuse-ld=bfd -C debuginfo=0
+  components:
+    description: Comma-separated Rust components to install.
+    required: false
+    default: ""
+  use_sccache:
+    description: Enable sccache.
+    required: false
+    default: "true"
+  use_rust_cache:
+    description: Enable rust-cache.
+    required: false
+    default: "true"
+  free_disk:
+    description: Free up disk space before building.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Free Disk Space
+      if: ${{ inputs.free_disk == 'true' }}
+      shell: bash
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        sudo docker image prune --all --force
+        df -h
+
+    - name: Install Rust (with components)
+      if: ${{ inputs.components != '' }}
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    - name: Install Rust
+      if: ${{ inputs.components == '' }}
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Setup sccache
+      if: ${{ inputs.use_sccache == 'true' }}
+      uses: mozilla-actions/sccache-action@v0.0.3
+
+    - name: Configure sccache
+      if: ${{ inputs.use_sccache == 'true' }}
+      shell: bash
+      run: echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+
+    - name: Rust cache
+      if: ${{ inputs.use_rust_cache == 'true' }}
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-directories: |
+          ~/.cache/sccache
+
+    - name: Run command
+      shell: bash
+      env:
+        RUSTFLAGS: ${{ inputs.rustflags }}
+      run: ${{ inputs.command }}
+
+    - name: sccache stats
+      if: ${{ always() && inputs.use_sccache == 'true' }}
+      shell: bash
+      run: sccache --show-stats

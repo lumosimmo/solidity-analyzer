@@ -5,38 +5,66 @@ on:
     branches: ["master"]
   pull_request:
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
+  RUSTUP_MAX_RETRIES: 10
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
   fmt:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      components: rustfmt
-      command: cargo fmt --all --check
-      free_disk: false
-      use_sccache: false
-      use_rust_cache: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          components: rustfmt
+          command: cargo fmt --all --check
+          free_disk: "false"
+          use_sccache: "false"
+          use_rust_cache: "false"
 
   clippy:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      components: clippy
-      command: cargo clippy --workspace --all-targets -- -D warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          components: clippy
+          command: cargo clippy --workspace --all-targets -- -D warnings
 
   test-debug:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      command: cargo test --workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          command: cargo test --workspace
 
   test-release:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      command: cargo test --release -p solidity-analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          command: cargo test --release -p solidity-analyzer
 
   build-release:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      command: cargo build --locked --release -p solidity-analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          command: cargo build --locked --release -p solidity-analyzer
 
   xtask-dist:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      command: cargo run -p xtask -- dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          command: cargo run -p xtask -- dist

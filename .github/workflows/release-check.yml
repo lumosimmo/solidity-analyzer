@@ -5,12 +5,25 @@ on:
     - cron: "0 2 * * 0"
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
+  RUSTUP_MAX_RETRIES: 10
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
   release-check:
-    uses: ./.github/workflows/rust-job.yml
-    with:
-      rustflags: ""
-      command: |
-        cargo test --workspace --release --locked
-        cargo build --locked --release -p solidity-analyzer
-        cargo run -p xtask -- dist --skip-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-job
+        with:
+          rustflags: ""
+          command: |
+            cargo test --workspace --release --locked
+            cargo build --locked --release -p solidity-analyzer
+            cargo run -p xtask -- dist --skip-build
