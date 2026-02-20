@@ -4,6 +4,8 @@ solidity-analyzer is a Solidity language server implementation with first-class 
 
 The architecture of solidity-analyzer is structured as a set of libraries for analyzing Solidity code. It's heavily inspired by [rust-analyzer](https://rust-analyzer.github.io/), the popular Rust language server.
 
+## ‼️ This extension is currently not published on the VS Code Marketplace. Any published version on the Marketplace is a scam.
+
 ## Features
 
 solidity-analyzer provides IDE features for Solidity development, including:
